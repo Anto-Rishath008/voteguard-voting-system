@@ -16,6 +16,10 @@ const publicRoutes = [
   "/",
   "/login",
   "/register",
+  "/forgot-password",
+  "/reset-password",
+  "/privacy",
+  "/terms",
   "/about",
   "/api/auth/callback",
 ];
@@ -40,6 +44,11 @@ export async function middleware(request: NextRequest) {
 
   try {
     const supabase = createMiddlewareClient(request, response);
+    
+    if (!supabase) {
+      console.error("Failed to create Supabase client in middleware");
+      return NextResponse.redirect(new URL("/login", request.url));
+    }
 
     // Get session
     const {
