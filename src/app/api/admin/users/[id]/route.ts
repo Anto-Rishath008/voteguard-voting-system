@@ -6,8 +6,9 @@ import { DatabaseUtils } from "@/lib/database";
 // DELETE /api/admin/users/[id] - Delete a user
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
   try {
     // Verify user authentication
     const { user: authUser, error: authError } = verifyJWT(request);
