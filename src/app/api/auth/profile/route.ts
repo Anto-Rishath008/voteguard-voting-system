@@ -5,34 +5,44 @@ import { verify } from "jsonwebtoken";
 
 export async function GET(request: NextRequest) {
   try {
+    console.log("Profile API called - checking authentication...");
+    
     // Check for local auth token first
     const authToken = request.cookies.get("auth_token")?.value;
+    console.log("Auth token present:", !!authToken);
 
     if (authToken) {
+      console.log("Using local auth");
       return await handleLocalAuth(request, authToken);
     }
 
     // Fall back to Supabase auth
+    console.log("Falling back to Supabase auth");
     return await handleSupabaseAuth(request);
   } catch (error) {
-    console.error("Profile error:", error);
+    console.error("Profile API error:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Internal server error", details: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }
     );
   }
 }
 
 async function handleLocalAuth(request: NextRequest, authToken: string) {
+  console.log("Handling local authentication...");
+  
   // Verify JWT token
   let decoded: any;
   try {
     const jwtSecret = process.env.JWT_SECRET;
     if (!jwtSecret) {
-      console.error("JWT_SECRET is not set");
+      console.error("JWT_SECRET is not set in environment variables");
       return NextResponse.json({ error: "Server configuration error" }, { status: 500 });
     }
+    
+    console.log("Verifying JWT token...");
     decoded = verify(authToken, jwtSecret);
+    console.log("JWT verification successful for user:", decoded.userId);
   } catch (error) {
     console.error("JWT verification failed:", error);
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
@@ -40,10 +50,11 @@ async function handleLocalAuth(request: NextRequest, authToken: string) {
 
   const supabase = createAdminClient();
   if (!supabase) {
-    console.error("Failed to create Supabase client");
+    console.error("Failed to create Supabase admin client");
     return NextResponse.json({ error: "Database connection failed" }, { status: 500 });
   }
 
+  console.log("Querying user details from database for user_id:", decoded.userId);
   // Get user details from database
   const { data: user, error: userError } = await supabase
     .from("users")
@@ -51,9 +62,17 @@ async function handleLocalAuth(request: NextRequest, authToken: string) {
     .eq("user_id", decoded.userId)
     .single();
 
-  if (userError || !user) {
+  if (userError) {
+    console.error("Database error when fetching user:", userError);
+    return NextResponse.json({ error: "Database error", details: userError.message }, { status: 500 });
+  }
+
+  if (!user) {
+    console.log("User not found in database for user_id:", decoded.userId);
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
+
+  console.log("User found in database:", user.email);
 
   // Check if account is still active
   if (user.status !== "Active") {
@@ -96,43 +115,61 @@ async function handleLocalAuth(request: NextRequest, authToken: string) {
 }
 
 async function handleSupabaseAuth(request: NextRequest) {
-  const supabase = createRouteHandlerClient(request);
-  if (!supabase) {
-    console.error("Failed to create Supabase route handler client");
-    return NextResponse.json({ error: "Database connection failed" }, { status: 500 });
+  console.log("Handling Supabase authentication...");
+  
+  try {
+    const supabase = createRouteHandlerClient(request);
+    if (!supabase) {
+      console.error("Failed to create Supabase route handler client");
+      return NextResponse.json({ error: "Database connection failed" }, { status: 500 });
+    }
+
+    console.log("Getting user from Supabase session...");
+    // Get current user from session
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    console.log("Supabase auth result:", { user: !!user, authError: !!authError });
+
+    if (authError) {
+      console.error("Supabase auth error:", authError);
+      return NextResponse.json({ error: "Authentication failed", details: authError.message }, { status: 401 });
+    }
+
+    if (!user) {
+      console.log("No user found in session");
+      return NextResponse.json({ error: "No user session found" }, { status: 401 });
+    }
+    // Get user details with roles from our database
+    console.log("Getting user details with roles for user:", user.id);
+    const userWithRoles = await DatabaseUtils.getUserWithRoles(user.id);
+
+    if (!userWithRoles) {
+      console.log("User profile not found in database for user:", user.id);
+      return NextResponse.json(
+        { error: "User profile not found" },
+        { status: 404 }
+      );
+    }
+
+    console.log("Successfully retrieved user profile");
+    // Return user data
+    return NextResponse.json({
+      user: {
+        ...user,
+        roles: userWithRoles.roles,
+        firstName: userWithRoles.first_name,
+        lastName: userWithRoles.last_name,
+        status: userWithRoles.status,
+        authMode: "supabase",
+      },
+    });
+  } catch (error) {
+    console.error("Error in handleSupabaseAuth:", error);
+    return NextResponse.json({ error: "Authentication error", details: error instanceof Error ? error.message : "Unknown error" }, { status: 500 });
   }
-
-  // Get current user from session
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-
-  if (authError || !user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // Get user details with roles from our database
-  const userWithRoles = await DatabaseUtils.getUserWithRoles(user.id);
-
-  if (!userWithRoles) {
-    return NextResponse.json(
-      { error: "User profile not found" },
-      { status: 404 }
-    );
-  }
-
-  // Return user data
-  return NextResponse.json({
-    user: {
-      ...user,
-      roles: userWithRoles.roles,
-      firstName: userWithRoles.first_name,
-      lastName: userWithRoles.last_name,
-      status: userWithRoles.status,
-      authMode: "supabase",
-    },
-  });
 }
 
 export async function PUT(request: NextRequest) {
