@@ -17,7 +17,7 @@ class EmailService {
 
     // Option 1: SMTP Configuration (Gmail, Outlook, etc.)
     if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-      this.transporter = nodemailer.createTransporter({
+      this.transporter = nodemailer.createTransport({
         host: process.env.SMTP_HOST,
         port: parseInt(process.env.SMTP_PORT || '587'),
         secure: process.env.SMTP_PORT === '465', // true for 465, false for other ports
@@ -31,7 +31,7 @@ class EmailService {
 
     // Option 2: SendGrid
     if (process.env.SENDGRID_API_KEY) {
-      this.transporter = nodemailer.createTransporter({
+      this.transporter = nodemailer.createTransport({
         service: 'SendGrid',
         auth: {
           user: 'apikey',
@@ -47,6 +47,10 @@ class EmailService {
   static async sendEmail(config: EmailConfig): Promise<boolean> {
     try {
       const transporter = this.getTransporter();
+      if (!transporter) {
+        console.error('No email transporter available');
+        return false;
+      }
       
       const mailOptions = {
         from: process.env.FROM_EMAIL || process.env.SMTP_USER,

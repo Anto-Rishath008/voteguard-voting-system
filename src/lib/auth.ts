@@ -158,7 +158,7 @@ export class AuthService {
     try {
       // Create user in Supabase Auth
       const { data: authData, error: authError } =
-        await this.supabase.auth.signUp({
+        await this.supabase?.auth.signUp({
           email,
           password,
           options: {

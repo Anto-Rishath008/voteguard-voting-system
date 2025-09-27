@@ -110,7 +110,7 @@ export class DatabaseUtils {
 
     if (error || !data) return false;
 
-    const userRoles = data.map((role) => role.role_name);
+    const userRoles = data.map((role: any) => role.role_name);
 
     // SuperAdmin has all permissions
     if (userRoles.includes("SuperAdmin")) return true;
@@ -142,7 +142,7 @@ export class DatabaseUtils {
 
     return {
       ...user,
-      roles: roles.map((r) => r.role_name),
+      roles: roles.map((r: any) => r.role_name),
     };
   }
 

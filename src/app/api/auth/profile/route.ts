@@ -170,6 +170,13 @@ async function handleLocalProfileUpdate(
   const { firstName, lastName } = await request.json();
   const supabase = createAdminClient();
 
+  if (!supabase) {
+    return NextResponse.json(
+      { error: "Database connection failed" },
+      { status: 500 }
+    );
+  }
+
   // Update user profile
   const { data: updatedUser, error: updateError } = await supabase
     .from("users")
@@ -207,6 +214,14 @@ async function handleLocalProfileUpdate(
 
 async function handleSupabaseProfileUpdate(request: NextRequest) {
   const supabase = createRouteHandlerClient(request);
+  
+  if (!supabase) {
+    return NextResponse.json(
+      { error: "Database connection failed" },
+      { status: 500 }
+    );
+  }
+
   const { firstName, lastName } = await request.json();
 
   // Get current user from session
