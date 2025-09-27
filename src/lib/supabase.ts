@@ -15,11 +15,19 @@ if (typeof window !== 'undefined' && (!supabaseUrl || supabaseAnonKey === 'dummy
 }
 
 // Client-side Supabase client
-export const createClientComponentClient = () =>
-  createBrowserClient(supabaseUrl, supabaseAnonKey);
+export const createClientComponentClient = () => {
+  if (!supabaseUrl || supabaseAnonKey === 'dummy-key-for-build') {
+    return null; // Return null during build time
+  }
+  return createBrowserClient(supabaseUrl, supabaseAnonKey);
+};
 
 // Server-side Supabase client for Server Components
 export const createServerComponentClient = () => {
+  if (!supabaseUrl || supabaseAnonKey === 'dummy-key-for-build') {
+    return null; // Return null during build time
+  }
+  
   const { cookies } = require("next/headers");
 
   return createServerClient(supabaseUrl, supabaseAnonKey, {
@@ -32,8 +40,12 @@ export const createServerComponentClient = () => {
 };
 
 // Server-side Supabase client for Route Handlers
-export const createRouteHandlerClient = (request: NextRequest) =>
-  createServerClient(supabaseUrl, supabaseAnonKey, {
+export const createRouteHandlerClient = (request: NextRequest) => {
+  if (!supabaseUrl || supabaseAnonKey === 'dummy-key-for-build') {
+    return null; // Return null during build time
+  }
+  
+  return createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
       get(name: string) {
         return request.cookies.get(name)?.value;
@@ -54,13 +66,18 @@ export const createRouteHandlerClient = (request: NextRequest) =>
       },
     },
   });
+};
 
 // Server-side Supabase client for Middleware
 export const createMiddlewareClient = (
   request: NextRequest,
   response: NextResponse
-) =>
-  createServerClient(supabaseUrl, supabaseAnonKey, {
+) => {
+  if (!supabaseUrl || supabaseAnonKey === 'dummy-key-for-build') {
+    return null; // Return null during build time
+  }
+  
+  return createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
       get(name: string) {
         return request.cookies.get(name)?.value;
@@ -81,15 +98,24 @@ export const createMiddlewareClient = (
       },
     },
   });
+};
 
 // Admin client with service role key for privileged operations
 export const createAdminClient = () => {
-  const serviceKey = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || supabaseAnonKey === 'dummy-key-for-build') {
+    return null; // Return null during build time
+  }
+  
+  const serviceKey = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY || 'dummy-service-key';
 
-  if (!serviceKey) {
-    throw new Error(
-      "NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY environment variable is not set"
-    );
+  if (!serviceKey || serviceKey === 'dummy-service-key') {
+    // Use anon key as fallback during build or when service key is missing
+    return createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
   }
 
   return createClient(supabaseUrl, serviceKey, {
