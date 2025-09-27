@@ -193,41 +193,133 @@ export default function RegisterPage() {
 
   const sendEmailOTP = async () => {
     setOtpStates(prev => ({ ...prev, emailLoading: true }));
+    setError("");
+    
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setOtpStates(prev => ({ ...prev, emailSent: true, emailLoading: false }));
-    } catch (error) {
-      setError("Failed to send email OTP");
+      const response = await fetch('/api/auth/send-otp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: formData.email,
+          type: 'email'
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        setOtpStates(prev => ({ ...prev, emailSent: true, emailLoading: false }));
+        
+        // Show development OTP in non-production
+        if (data.devOtp) {
+          setError(`Development Mode: Use OTP ${data.devOtp} (expires in 5 minutes)`);
+        }
+      } else {
+        throw new Error(data.error || 'Failed to send email OTP');
+      }
+    } catch (error: any) {
+      setError(error.message || "Failed to send email OTP");
       setOtpStates(prev => ({ ...prev, emailLoading: false }));
     }
   };
 
   const sendPhoneOTP = async () => {
     setOtpStates(prev => ({ ...prev, phoneLoading: true }));
+    setError("");
+    
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setOtpStates(prev => ({ ...prev, phoneSent: true, phoneLoading: false }));
-    } catch (error) {
-      setError("Failed to send phone OTP");
+      const response = await fetch('/api/auth/send-otp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: formData.phoneNumber, // Using phone number in email field for this API
+          type: 'phone'
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        setOtpStates(prev => ({ ...prev, phoneSent: true, phoneLoading: false }));
+        
+        // Show development OTP in non-production
+        if (data.devOtp) {
+          setError(`Development Mode: Use OTP ${data.devOtp} (expires in 5 minutes)`);
+        }
+      } else {
+        throw new Error(data.error || 'Failed to send SMS OTP');
+      }
+    } catch (error: any) {
+      setError(error.message || "Failed to send SMS OTP");
       setOtpStates(prev => ({ ...prev, phoneLoading: false }));
     }
   };
 
   const verifyEmailOTP = async () => {
-    if (formData.emailOtp === "123456") { // Mock verification
-      setOtpStates(prev => ({ ...prev, emailVerified: true }));
-    } else {
-      setError("Invalid email OTP");
+    if (!formData.emailOtp) {
+      setError("Please enter the OTP");
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/auth/verify-otp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: formData.email,
+          otp: formData.emailOtp,
+          type: 'email'
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        setOtpStates(prev => ({ ...prev, emailVerified: true }));
+        setError(""); // Clear any errors
+      } else {
+        throw new Error(data.error || 'Invalid email OTP');
+      }
+    } catch (error: any) {
+      setError(error.message || "Invalid email OTP");
     }
   };
 
   const verifyPhoneOTP = async () => {
-    if (formData.phoneOtp === "123456") { // Mock verification
-      setOtpStates(prev => ({ ...prev, phoneVerified: true }));
-    } else {
-      setError("Invalid phone OTP");
+    if (!formData.phoneOtp) {
+      setError("Please enter the SMS code");
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/auth/verify-otp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: formData.phoneNumber, // Using phone number in email field for this API
+          otp: formData.phoneOtp,
+          type: 'phone'
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        setOtpStates(prev => ({ ...prev, phoneVerified: true }));
+        setError(""); // Clear any errors
+      } else {
+        throw new Error(data.error || 'Invalid SMS code');
+      }
+    } catch (error: any) {
+      setError(error.message || "Invalid SMS code");
     }
   };
 
@@ -555,8 +647,11 @@ export default function RegisterPage() {
         <div className="flex items-start space-x-2">
           <AlertTriangle className="h-5 w-5 text-blue-600 mt-0.5" />
           <div className="text-sm text-blue-800">
-            <p className="font-medium">Verification Required</p>
-            <p>Both email and phone verification are mandatory for account security.</p>
+            <p className="font-medium">Real OTP Verification Required</p>
+            <p>You will receive a 6-digit code via email and SMS. Both verifications are mandatory for account security.</p>
+            <p className="mt-1 text-xs text-blue-700">
+              📧 Email OTP expires in 5 minutes | 📱 SMS OTP expires in 5 minutes
+            </p>
           </div>
         </div>
       </div>
