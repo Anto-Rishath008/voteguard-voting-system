@@ -42,28 +42,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Role-specific validation
+    // Enhanced security validation - ALL users now require Aadhaar
+    if (!phoneNumber || !aadhaarNumber) {
+      return NextResponse.json(
+        { error: "All users require phone number and Aadhaar number for enhanced security" },
+        { status: 400 }
+      );
+    }
+
+    // Role-specific additional validation
     if (role !== "voter") {
-      if (!phoneNumber || !aadhaarNumber || !collegeId || !instituteName) {
+      if (!collegeId || !instituteName) {
         return NextResponse.json(
-          { error: "Admin roles require phone, Aadhaar, college ID, and institution name" },
-          { status: 400 }
-        );
-      }
-    } else {
-      if (!phoneNumber || (!aadhaarNumber && !collegeId)) {
-        return NextResponse.json(
-          { error: "Voters require phone and at least one ID (Aadhaar or College)" },
+          { error: "Admin roles require college ID and institution name in addition to basic requirements" },
           { status: 400 }
         );
       }
     }
 
-    // Security questions validation
-    const requiredQuestions = role === "voter" ? 1 : role === "admin" ? 2 : 3;
+    // Security questions validation - Enhanced for all users
+    const requiredQuestions = role === "voter" ? 2 : role === "admin" ? 2 : 3;
     if (!securityQuestions || securityQuestions.length < requiredQuestions) {
       return NextResponse.json(
-        { error: `${role.replace('_', ' ')} role requires ${requiredQuestions} security question(s)` },
+        { error: `Enhanced security requires ${requiredQuestions} security question(s) for ${role.replace('_', ' ')} role` },
         { status: 400 }
       );
     }

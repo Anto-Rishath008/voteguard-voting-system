@@ -95,16 +95,16 @@ export default function RegisterPage() {
     }
   }, []);
 
-  // Get security requirements based on role
+  // Get security requirements based on role - ALL USERS NOW REQUIRE ENHANCED SECURITY
   const getSecurityLevel = () => {
     switch(formData.role) {
       case 'voter':
         return {
-          steps: 4,
-          requiresFingerprint: false,
-          securityQuestions: 1,
+          steps: 5,
+          requiresFingerprint: true,
+          securityQuestions: 2,
           requiresReference: false,
-          verificationLevel: 'Basic'
+          verificationLevel: 'Enhanced'
         };
       case 'admin':
         return {
@@ -124,11 +124,11 @@ export default function RegisterPage() {
         };
       default:
         return {
-          steps: 4,
-          requiresFingerprint: false,
-          securityQuestions: 1,
+          steps: 5,
+          requiresFingerprint: true,
+          securityQuestions: 2,
           requiresReference: false,
-          verificationLevel: 'Basic'
+          verificationLevel: 'Enhanced'
         };
     }
   };
@@ -167,8 +167,11 @@ export default function RegisterPage() {
       case 2:
         return !!(formData.phoneNumber && otpStates.emailVerified && otpStates.phoneVerified);
       case 3:
+        // ALL users now require Aadhaar verification
+        if (!formData.aadhaarNumber) return false;
+        // Admin/SuperAdmin also need college ID and institution
         const idValid = formData.role === 'voter' ? 
-          !!(formData.aadhaarNumber || formData.collegeId) :
+          !!(formData.aadhaarNumber) :
           !!(formData.aadhaarNumber && formData.collegeId && formData.instituteName);
         return idValid;
       case 4:
@@ -177,11 +180,12 @@ export default function RegisterPage() {
           .filter(q => q.question && q.answer.length >= 3);
         return answeredQuestions.length === requiredQuestions;
       case 5:
-        if (formData.role === 'voter') return true;
+        // All users now require fingerprint (or acknowledge if not supported)
+        const hasFingerprint = !!(formData.fingerprintData || !fingerprintSupported);
         if (formData.role === 'super_admin') {
-          return !!(formData.referenceCode && formData.authorizedBy && formData.reason);
+          return hasFingerprint && !!(formData.referenceCode && formData.authorizedBy && formData.reason);
         }
-        return true;
+        return hasFingerprint;
       default:
         return false;
     }
@@ -391,14 +395,14 @@ export default function RegisterPage() {
                 icon: <UserCheck className="h-5 w-5" />, 
                 title: "Voter", 
                 desc: "Can participate in elections",
-                security: "Basic Security: Email + Phone + 1 Security Question",
+                security: "Enhanced Security: Email + Phone + Aadhaar + Fingerprint + 2 Security Questions",
                 color: "blue"
               },
               admin: { 
                 icon: <Shield className="h-5 w-5" />, 
                 title: "Admin", 
                 desc: "Can manage elections and users",
-                security: "Enhanced Security: All Voter requirements + Biometric + 2 Security Questions",
+                security: "Enhanced Security: All Voter requirements + Institution Verification",
                 color: "orange"
               },
               super_admin: { 
@@ -566,17 +570,17 @@ export default function RegisterPage() {
         <p className="text-sm text-gray-600">Provide your identification details</p>
       </div>
 
-      {/* Aadhaar Number */}
+      {/* Aadhaar Number - NOW MANDATORY FOR ALL USERS */}
       <Input
-        label="Aadhaar Number"
+        label="Aadhaar Number (Required for All Users)"
         name="aadhaarNumber"
         type="text"
         value={formData.aadhaarNumber}
         onChange={handleChange}
-        required={formData.role !== 'voter'}
+        required={true}
         leftIcon={<IdCard className="h-5 w-5" />}
         placeholder="1234 5678 9012"
-        helpText="12-digit unique identification number"
+        helpText="12-digit unique identification number - Required for enhanced security"
         maxLength={14}
       />
 
@@ -698,44 +702,65 @@ export default function RegisterPage() {
         </p>
       </div>
 
-      {/* Biometric Registration for Admin/SuperAdmin */}
-      {formData.role !== 'voter' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-            <div className="flex items-center space-x-3">
-              <Fingerprint className="h-6 w-6 text-blue-600" />
-              <div>
-                <h4 className="font-medium text-gray-900">Fingerprint Registration</h4>
-                <p className="text-sm text-gray-600">Required for admin access</p>
+      {/* Biometric Registration - NOW REQUIRED FOR ALL USERS */}
+      <div className="space-y-4">
+        <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+          <div className="flex items-start space-x-2 mb-3">
+            <Fingerprint className="h-6 w-6 text-blue-600 mt-0.5" />
+            <div>
+              <h4 className="font-medium text-blue-900">Enhanced Security: Biometric Registration</h4>
+              <p className="text-sm text-blue-800">All VoteGuard users now require fingerprint registration for maximum security</p>
+            </div>
+          </div>
+        </div>
+        
+        <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+          <div className="flex items-center space-x-3">
+            <Fingerprint className="h-6 w-6 text-blue-600" />
+            <div>
+              <h4 className="font-medium text-gray-900">Fingerprint Registration</h4>
+              <p className="text-sm text-gray-600">
+                {formData.role === 'voter' ? 'Required for secure voting access' : 
+                 formData.role === 'admin' ? 'Required for admin privileges' : 
+                 'Required for super admin access'}
+              </p>
+            </div>
+          </div>
+          <Button
+            onClick={handleFingerprintRegister}
+            variant={formData.fingerprintData ? "outline" : "primary"}
+            size="sm"
+            disabled={!fingerprintSupported}
+          >
+            {formData.fingerprintData ? (
+              <>
+                <CheckCircle className="h-4 w-4 mr-1 text-green-600" />
+                Registered
+              </>
+            ) : (
+              <>
+                <Fingerprint className="h-4 w-4 mr-1" />
+                Register Now
+              </>
+            )}
+          </Button>
+        </div>
+
+        {!fingerprintSupported && (
+          <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+            <div className="flex items-start space-x-2">
+              <AlertTriangle className="h-5 w-5 text-orange-600 mt-0.5" />
+              <div className="text-sm">
+                <p className="text-orange-800 font-medium">Fingerprint Not Available</p>
+                <p className="text-orange-700">
+                  Biometric authentication is not supported on this device. You can set this up later from your profile settings.
+                  For now, you can proceed with other security measures.
+                </p>
               </div>
             </div>
-            <Button
-              onClick={handleFingerprintRegister}
-              variant={formData.fingerprintData ? "outline" : "primary"}
-              size="sm"
-              disabled={!fingerprintSupported}
-            >
-              {formData.fingerprintData ? (
-                <>
-                  <CheckCircle className="h-4 w-4 mr-1 text-green-600" />
-                  Registered
-                </>
-              ) : (
-                <>
-                  <Fingerprint className="h-4 w-4 mr-1" />
-                  Register
-                </>
-              )}
-            </Button>
           </div>
-
-          {!fingerprintSupported && (
-            <p className="text-sm text-orange-600">
-              Fingerprint authentication not supported on this device. This may be configured later.
-            </p>
-          )}
-        </div>
-      )}
+        )}
+      </div>
 
       {/* SuperAdmin Reference Code */}
       {formData.role === 'super_admin' && (

@@ -27,12 +27,22 @@ async function handleLocalAuth(request: NextRequest, authToken: string) {
   // Verify JWT token
   let decoded: any;
   try {
-    decoded = verify(authToken, process.env.JWT_SECRET!);
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      console.error("JWT_SECRET is not set");
+      return NextResponse.json({ error: "Server configuration error" }, { status: 500 });
+    }
+    decoded = verify(authToken, jwtSecret);
   } catch (error) {
+    console.error("JWT verification failed:", error);
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
 
   const supabase = createAdminClient();
+  if (!supabase) {
+    console.error("Failed to create Supabase client");
+    return NextResponse.json({ error: "Database connection failed" }, { status: 500 });
+  }
 
   // Get user details from database
   const { data: user, error: userError } = await supabase
@@ -87,6 +97,10 @@ async function handleLocalAuth(request: NextRequest, authToken: string) {
 
 async function handleSupabaseAuth(request: NextRequest) {
   const supabase = createRouteHandlerClient(request);
+  if (!supabase) {
+    console.error("Failed to create Supabase route handler client");
+    return NextResponse.json({ error: "Database connection failed" }, { status: 500 });
+  }
 
   // Get current user from session
   const {
