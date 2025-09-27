@@ -21,8 +21,19 @@ export async function GET(request: NextRequest) {
     return await handleSupabaseAuth(request);
   } catch (error) {
     console.error("Profile API error:", error);
+    // Return a more specific error for debugging
+    if (error instanceof Error) {
+      return NextResponse.json(
+        { 
+          error: "Internal server error", 
+          message: error.message,
+          stack: process.env.NODE_ENV === "development" ? error.stack : undefined
+        },
+        { status: 500 }
+      );
+    }
     return NextResponse.json(
-      { error: "Internal server error", details: error instanceof Error ? error.message : "Unknown error" },
+      { error: "Internal server error", message: "Unknown error" },
       { status: 500 }
     );
   }
@@ -45,7 +56,11 @@ async function handleLocalAuth(request: NextRequest, authToken: string) {
     console.log("JWT verification successful for user:", decoded.userId);
   } catch (error) {
     console.error("JWT verification failed:", error);
-    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+    return NextResponse.json({ 
+      error: "Invalid token",
+      message: "Authentication token is invalid or expired",
+      authRequired: true
+    }, { status: 401 });
   }
 
   const supabase = createAdminClient();
@@ -140,7 +155,11 @@ async function handleSupabaseAuth(request: NextRequest) {
 
     if (!user) {
       console.log("No user found in session");
-      return NextResponse.json({ error: "No user session found" }, { status: 401 });
+      return NextResponse.json({ 
+        error: "No user session found", 
+        message: "Please log in to access your profile",
+        authRequired: true 
+      }, { status: 401 });
     }
     // Get user details with roles from our database
     console.log("Getting user details with roles for user:", user.id);
