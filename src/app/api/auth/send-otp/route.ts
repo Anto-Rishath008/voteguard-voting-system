@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase";
 import crypto from "crypto";
+import EmailService from "@/lib/email";
+import SMSService from "@/lib/sms";
 
 // Generate a 6-digit OTP
 function generateOTP(): string {
@@ -64,18 +66,34 @@ export async function POST(request: NextRequest) {
       // For now, we'll continue without storing in DB
     }
 
-    // In a real implementation, you would send the OTP via email/SMS
-    // For development, we'll return it in the response (REMOVE IN PRODUCTION)
+    // Send OTP via email or SMS
     const isProduction = process.env.NODE_ENV === "production";
+    let sendSuccess = false;
     
     if (type === "email") {
-      // TODO: Implement real email sending
-      // await sendEmailOTP(email, otp);
-      console.log(`📧 Email OTP for ${email}: ${otp} (expires in 5 minutes)`);
+      try {
+        sendSuccess = await EmailService.sendOTPEmail(email, otp);
+        if (sendSuccess) {
+          console.log(`📧 Email OTP sent successfully to ${email}`);
+        } else {
+          console.log(`📧 Email OTP for ${email}: ${otp} (expires in 5 minutes) - EMAIL SENDING FAILED`);
+        }
+      } catch (error) {
+        console.error("Email sending error:", error);
+        console.log(`📧 Email OTP for ${email}: ${otp} (expires in 5 minutes) - FALLBACK`);
+      }
     } else if (type === "phone") {
-      // TODO: Implement real SMS sending
-      // await sendSMSOTP(email, otp); // email contains phone in this case
-      console.log(`📱 SMS OTP for ${email}: ${otp} (expires in 5 minutes)`);
+      try {
+        sendSuccess = await SMSService.sendOTPSMS(email, otp); // email contains phone in this case
+        if (sendSuccess) {
+          console.log(`📱 SMS OTP sent successfully to ${email}`);
+        } else {
+          console.log(`📱 SMS OTP for ${email}: ${otp} (expires in 5 minutes) - SMS SENDING FAILED`);
+        }
+      } catch (error) {
+        console.error("SMS sending error:", error);
+        console.log(`📱 SMS OTP for ${email}: ${otp} (expires in 5 minutes) - FALLBACK`);
+      }
     }
 
     return NextResponse.json({

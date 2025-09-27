@@ -89,6 +89,29 @@ export class AuthService {
     }
   }
 
+  static async registerEnhanced(registrationData: any): Promise<{ user: LocalAuthUser | null; error: string | null }> {
+    try {
+      const response = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(registrationData),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        return { user: null, error: data.error || "Registration failed" };
+      }
+
+      return { user: data.user, error: null };
+    } catch (error) {
+      console.error("Enhanced registration error:", error);
+      return { user: null, error: "Network error occurred" };
+    }
+  }
+
   static async logoutLocal(): Promise<void> {
     try {
       await fetch("/api/auth/logout", {

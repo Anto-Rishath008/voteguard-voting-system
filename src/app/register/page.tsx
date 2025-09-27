@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth, type EnhancedRegistrationData } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card, CardContent } from "@/components/ui/Card";
@@ -65,7 +65,10 @@ export default function RegisterPage() {
     // Additional Security (SuperAdmin)
     referenceCode: "",
     authorizedBy: "",
-    reason: ""
+    reason: "",
+    
+    // Terms Agreement
+    agreedToTerms: false
   });
   
   const [stepValidation, setStepValidation] = useState({
@@ -85,7 +88,7 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [fingerprintSupported, setFingerprintSupported] = useState(false);
 
-  const { signUp } = useAuth();
+  const { signUp, signUpEnhanced } = useAuth();
   const router = useRouter();
 
   // Check biometric support
@@ -366,14 +369,22 @@ export default function RegisterPage() {
 
     try {
       // Submit enhanced registration data
-      await signUp(
-        formData.email,
-        formData.password,
-        formData.confirmPassword,
-        formData.firstName,
-        formData.lastName,
-        formData.role
-      );
+      const registrationData: EnhancedRegistrationData = {
+        email: formData.email,
+        password: formData.password,
+        confirmPassword: formData.confirmPassword,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        role: formData.role,
+        phoneNumber: formData.phoneNumber,
+        aadhaarNumber: formData.aadhaarNumber,
+        collegeId: formData.collegeId,
+        securityQuestions: formData.securityQuestions,
+        fingerprintData: formData.fingerprintData || "",
+        agreedToTerms: formData.agreedToTerms
+      };
+
+      await signUpEnhanced(registrationData);
       router.push("/dashboard");
     } catch (err: any) {
       setError(err.message || "Registration failed");

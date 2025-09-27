@@ -3,6 +3,21 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { AuthService, type LocalAuthUser } from "@/lib/auth";
 
+export interface EnhancedRegistrationData {
+  email: string;
+  password: string;
+  confirmPassword: string;
+  firstName: string;
+  lastName: string;
+  role: string;
+  phoneNumber: string;
+  aadhaarNumber: string;
+  collegeId?: string;
+  securityQuestions: { question: string; answer: string }[];
+  fingerprintData: string;
+  agreedToTerms: boolean;
+}
+
 interface AuthContextType {
   user: LocalAuthUser | null;
   loading: boolean;
@@ -15,6 +30,7 @@ interface AuthContextType {
     lastName: string,
     role?: string
   ) => Promise<any>;
+  signUpEnhanced: (data: EnhancedRegistrationData) => Promise<any>;
   signOut: () => Promise<void>;
   hasRole: (role: "Voter" | "Admin" | "SuperAdmin") => boolean;
   isAdmin: boolean;
@@ -108,6 +124,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const signUpEnhanced = async (data: EnhancedRegistrationData) => {
+    setLoading(true);
+    try {
+      const result = await AuthService.registerEnhanced(data);
+
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      return result;
+    } catch (error) {
+      console.error("Enhanced sign up error:", error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const signOut = async () => {
     setLoading(true);
     try {
@@ -140,6 +174,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     loading,
     signIn,
     signUp,
+    signUpEnhanced,
     signOut,
     hasRole,
     isAdmin,
