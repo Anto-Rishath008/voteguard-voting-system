@@ -52,13 +52,6 @@ jobs:
         with:
           name: node-app
       
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_F2AA4ACD670148BF8B249A9B49208B44 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_C87F920FBD1A4B93939BB16E5885046A }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_2D3914BCB1C14324A0B9580FD4A8EB3E }}
-
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v3
@@ -66,4 +59,5 @@ jobs:
           app-name: 'voteguard-webapp-7388'
           slot-name: 'Production'
           package: .
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           
