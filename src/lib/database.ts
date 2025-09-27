@@ -3,7 +3,18 @@ import crypto from "crypto";
 
 // Database utility functions
 export class DatabaseUtils {
-  private static supabase = createAdminClient();
+  private static supabaseClient: any = null;
+  
+  private static getSupabase() {
+    if (!this.supabaseClient) {
+      this.supabaseClient = createAdminClient();
+    }
+    return this.supabaseClient;
+  }
+  
+  private static get supabase() {
+    return this.getSupabase();
+  }
 
   // Generate cryptographic hash for vote chaining
   static generateVoteHash(voteData: {
