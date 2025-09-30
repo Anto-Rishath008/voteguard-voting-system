@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { AuthService, type LocalAuthUser } from "@/lib/auth";
+import { AuthService, type AuthUser } from "@/lib/auth";
 
 export interface EnhancedRegistrationData {
   email: string;
@@ -19,7 +19,7 @@ export interface EnhancedRegistrationData {
 }
 
 interface AuthContextType {
-  user: LocalAuthUser | null;
+  user: AuthUser | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<any>;
   signUp: (
@@ -41,13 +41,13 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<LocalAuthUser | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Function to refresh user data
   const refreshUser = async () => {
     try {
-      const currentUser = await AuthService.getCurrentUserLocal();
+      const currentUser = await AuthService.getCurrentUser();
       setUser(currentUser);
     } catch (error) {
       console.error("Error refreshing user:", error);
@@ -56,10 +56,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    // Get initial session for local auth
+    // Get initial session
     const getInitialSession = async () => {
       try {
-        const currentUser = await AuthService.getCurrentUserLocal();
+        const currentUser = await AuthService.getCurrentUser();
         setUser(currentUser);
       } catch (error) {
         console.error("Error getting initial session:", error);
@@ -75,7 +75,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signIn = async (email: string, password: string) => {
     setLoading(true);
     try {
-      const result = await AuthService.signIn(email, password);
+      const result = await AuthService.loginWithSupabase(email, password);
 
       if (result.error) {
         throw new Error(result.error);

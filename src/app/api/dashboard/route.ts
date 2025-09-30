@@ -4,7 +4,7 @@ import { verifyJWT } from "@/lib/auth";
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify JWT token instead of Supabase auth
+    // Verify JWT token
     const { user: authUser, error: authError } = verifyJWT(request);
 
     if (authError || !authUser) {
@@ -12,8 +12,15 @@ export async function GET(request: NextRequest) {
     }
 
     const supabase = createAdminClient();
+    
+    if (!supabase) {
+      return NextResponse.json(
+        { error: "Database connection failed" },
+        { status: 500 }
+      );
+    }
 
-    // Get user profile using our local auth user ID
+    // Get user profile from database
     const { data: userProfile, error: profileError } = await supabase
       .from("users")
       .select("user_id, first_name, last_name, email, status")
@@ -27,7 +34,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get all elections (simplified for now - can add jurisdiction filtering later)
+    // Get all elections
     const { data: electionsData, error: electionsError } = await supabase
       .from("elections")
       .select(
