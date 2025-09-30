@@ -6,13 +6,14 @@ export async function GET(request: NextRequest) {
     console.log("Health check started...");
     
     // Test database connection
-    const supabase = createAdminClient();
     let dbStatus = "failed";
     let dbError = null;
+    let connectionType = "none";
+    const supabase = createAdminClient();
     
     if (supabase) {
       try {
-        console.log("Testing database connection...");
+        console.log("Testing Supabase connection...");
         const { data, error } = await supabase
           .from("users")
           .select("count")
@@ -20,17 +21,18 @@ export async function GET(request: NextRequest) {
         
         if (error) {
           dbError = error.message;
-          console.error("Database test error:", error);
+          console.error("Supabase test error:", error);
         } else {
           dbStatus = "connected";
-          console.log("Database connection successful");
+          connectionType = "supabase";
+          console.log("Supabase connection successful");
         }
       } catch (err) {
-        dbError = err instanceof Error ? err.message : "Unknown database error";
-        console.error("Database connection error:", err);
+        dbError = err instanceof Error ? err.message : "Unknown Supabase error";
+        console.error("Supabase connection error:", err);
       }
     } else {
-      dbError = "Failed to create Supabase client";
+      dbError = "Failed to create Supabase client - missing environment variables";
       console.error("Failed to create Supabase client");
     }
 
@@ -40,11 +42,14 @@ export async function GET(request: NextRequest) {
       environment: process.env.NODE_ENV,
       database: {
         status: dbStatus,
+        connectionType: connectionType,
         error: dbError,
       },
       services: {
         supabaseClient: !!supabase,
         jwtSecret: !!process.env.JWT_SECRET,
+        hasSupabaseUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+        hasSupabaseKey: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       }
     };
 
