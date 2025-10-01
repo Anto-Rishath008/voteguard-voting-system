@@ -31,23 +31,89 @@ jobs:
       run: npm run build
       env:
         NODE_ENV: production
+        AZURE_DATABASE_URL: ${{ secrets.AZURE_DATABASE_URL }}
+        JWT_SECRET: ${{ secrets.JWT_SECRET }}
 
-    - name: 📤 Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-files
-        path: |
-          .next/
-          public/
-          package*.json
-          node_modules/
+    - name: � Prepare deployment package
+      run: |
+        # Create deployment directory
+        mkdir -p deploy
+        
+        # Copy necessary files for deployment
+        cp -r .next deploy/
+        cp -r public deploy/
+        cp -r src deploy/
+        cp package*.json deploy/
+        cp server.js deploy/
+        cp next.config.* deploy/ 2>/dev/null || true
+        cp tsconfig.json deploy/ 2>/dev/null || true
+        
+        # Install production dependencies in deploy directory
+        cd deploy
+        npm ci --only=production
+        cd ..
+        
+        # Create web.config for Azure App Service
+        cat > deploy/web.config << 'EOF'
+        <?xml version="1.0" encoding="utf-8"?>
+        <configuration>
+          <system.webServer>
+            <handlers>
+              <add name="iisnode" path="server.js" verb="*" modules="iisnode"/>
+            </handlers>
+            <rewrite>
+              <rules>
+                <rule name="StaticContent">
+                  <action type="Rewrite" url="public{REQUEST_URI}"/>
+                </rule>
+                <rule name="DynamicContent">
+                  <conditions>
+                    <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="True"/>
+                  </conditions>
+                  <action type="Rewrite" url="server.js"/>
+                </rule>
+              </rules>
+            </rewrite>
+            <iisnode
+              node_env="production"
+              nodeProcessCountPerApplication="1"
+              maxConcurrentRequestsPerProcess="1024"
+              maxNamedPipeConnectionRetry="3"
+              namedPipeConnectionRetryDelay="2000"
+              maxNamedPipeConnectionPoolSize="512"
+              maxNamedPipePooledConnectionAge="30000"
+              asyncCompletionThreadCount="0"
+              initialRequestBufferSize="4096"
+              maxRequestBufferSize="65536"
+              watchedFiles="*.js"
+              uncFileChangesPollingInterval="5000"
+              gracefulShutdownTimeout="60000"
+              loggingEnabled="true"
+              logDirectoryNameSuffix="logs"
+              debuggingEnabled="false"
+              devErrorsEnabled="false"
+              flushResponse="false"
+              enableXFF="false"
+              promoteServerVars=""
+            />
+            <security>
+              <requestFiltering>
+                <hiddenSegments>
+                  <remove segment="bin"/>
+                </hiddenSegments>
+              </requestFiltering>
+            </security>
+            <httpErrors existingResponse="PassThrough" />
+          </system.webServer>
+        </configuration>
+        EOF
 
     - name: 🚀 Deploy to Azure Web App
       uses: azure/webapps-deploy@v2
       with:
         app-name: ${{ vars.AZURE_WEBAPP_NAME }}
         publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-        package: .
+        package: ./deploy
 
   database-health-check:
     runs-on: ubuntu-latest
