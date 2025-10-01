@@ -46,9 +46,11 @@ export class AuthService {
       }
 
       if (data.success && data.user && data.token) {
-        // Store the JWT token
-        localStorage.setItem("auth_token", data.token);
-        localStorage.setItem("user", JSON.stringify(data.user));
+        // Store the JWT token (only in browser)
+        if (typeof window !== 'undefined') {
+          localStorage.setItem("auth_token", data.token);
+          localStorage.setItem("user", JSON.stringify(data.user));
+        }
 
         return {
           user: {
@@ -72,6 +74,11 @@ export class AuthService {
 
   static async getCurrentUser(): Promise<AuthUser | null> {
     try {
+      // Check if we're in the browser environment
+      if (typeof window === 'undefined') {
+        return null; // Return null on server-side
+      }
+
       // First check if user is stored in localStorage
       const storedUser = localStorage.getItem("user");
       const storedToken = localStorage.getItem("auth_token");
@@ -113,12 +120,15 @@ export class AuthService {
   static async logout(): Promise<void> {
     try {
       // Call logout API
-      await fetch("/api/auth/logout", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${localStorage.getItem("auth_token")}`
-        }
-      });
+      const token = typeof window !== 'undefined' ? localStorage.getItem("auth_token") : null;
+      if (token) {
+        await fetch("/api/auth/logout", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${token}`
+          }
+        });
+      }
     } catch (error) {
       console.error("Logout API error:", error);
     } finally {
@@ -128,8 +138,10 @@ export class AuthService {
   }
 
   private static clearAuthData(): void {
-    localStorage.removeItem("auth_token");
-    localStorage.removeItem("user");
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem("auth_token");
+      localStorage.removeItem("user");
+    }
   }
 
   // Register method
