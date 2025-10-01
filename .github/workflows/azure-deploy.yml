@@ -66,12 +66,11 @@ jobs:
     - name: 📦 Install dependencies
       run: npm install
 
-    - name: 🗄️ Run Supabase migration
-      run: node migrate-to-supabase.js
+    - name: 🗄️ Run database setup (direct PostgreSQL)
+      run: node setup-database-direct.js
       env:
-        NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
-        SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        DATABASE_URL: "postgresql://postgres.feympezypmbcppxtgkbi:VoteGuard2024!@aws-0-ap-south-1.pooler.supabase.com:6543/postgres"
+        NODE_ENV: production
 
     - name: ✅ Migration complete
       run: echo "Database migration completed successfully!"
