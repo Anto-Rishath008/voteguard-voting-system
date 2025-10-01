@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase";
-import { DatabaseUtils } from "@/lib/database";
+import { EnhancedDatabase } from "@/lib/enhanced-database";
 import { v4 as uuidv4 } from "uuid";
 import bcrypt from "bcryptjs";
 
