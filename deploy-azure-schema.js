@@ -77,8 +77,8 @@ class AzureSchemaDeployer {
     try {
       console.log('\n🚀 Starting Enhanced Schema Deployment...');
       
-      // Read the enhanced schema file
-      const schemaPath = path.join(__dirname, '..', 'database', 'enhanced_schema.sql');
+      // Read the Azure-compatible schema file
+      const schemaPath = path.join(__dirname, 'database', 'azure_schema.sql');
       
       if (!fs.existsSync(schemaPath)) {
         console.error('❌ Enhanced schema file not found at:', schemaPath);
