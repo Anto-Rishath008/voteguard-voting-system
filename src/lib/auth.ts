@@ -1,10 +1,8 @@
-import { User } from "@supabase/supabase-js";
-import { createClientComponentClient } from "@/lib/supabase";
 import { verify } from "jsonwebtoken";
 import { NextRequest } from "next/server";
 
 export interface AuthUser {
-  id: string;
+  userId: string;
   email: string;
   roles?: string[];
   firstName?: string;
@@ -22,15 +20,13 @@ export interface JWTPayload {
 }
 
 export class AuthService {
-  private static supabase = createClientComponentClient();
-
-  // Supabase Authentication Methods
-  static async loginWithSupabase(
+  // Azure Database Authentication Methods
+  static async loginWithAzureDB(
     email: string,
     password: string
   ): Promise<{ user: AuthUser | null; error: string | null }> {
     try {
-      // Use our custom login API that handles Supabase authentication
+      // Use our Azure Database login API
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: {
@@ -48,116 +44,42 @@ export class AuthService {
       if (data.success && data.user && data.token) {
         // Store the JWT token (only in browser)
         if (typeof window !== 'undefined') {
-          localStorage.setItem("auth_token", data.token);
-          localStorage.setItem("user", JSON.stringify(data.user));
+          document.cookie = `auth-token=${data.token}; path=/; max-age=86400; secure; samesite=strict`;
         }
 
         return {
           user: {
-            id: data.user.id,
+            userId: data.user.userId || data.user.user_id,
             email: data.user.email,
-            roles: data.user.roles || [data.user.role],
-            firstName: data.user.firstName,
-            lastName: data.user.lastName,
-            status: "Active"
+            firstName: data.user.firstName || data.user.first_name,
+            lastName: data.user.lastName || data.user.last_name,
+            roles: data.user.roles || [],
+            status: data.user.status,
           },
-          error: null
+          error: null,
         };
       }
 
-      return { user: null, error: "Invalid response from server" };
+      return { user: null, error: "Authentication failed" };
     } catch (error) {
-      console.error("Supabase login error:", error);
+      console.error("Azure DB login error:", error);
       return { user: null, error: "Network error occurred" };
     }
   }
 
-  static async getCurrentUser(): Promise<AuthUser | null> {
-    try {
-      // Check if we're in the browser environment
-      if (typeof window === 'undefined') {
-        return null; // Return null on server-side
-      }
-
-      // First check if user is stored in localStorage
-      const storedUser = localStorage.getItem("user");
-      const storedToken = localStorage.getItem("auth_token");
-
-      if (storedUser && storedToken) {
-        // Verify the token is still valid
-        const user = JSON.parse(storedUser);
-        
-        // Optionally verify token with server
-        try {
-          const response = await fetch("/api/auth/profile", {
-            headers: {
-              "Authorization": `Bearer ${storedToken}`
-            }
-          });
-
-          if (response.ok) {
-            return user;
-          } else {
-            // Token is invalid, clear storage
-            this.clearAuthData();
-            return null;
-          }
-        } catch (error) {
-          // If profile check fails, but we have stored data, return it
-          // This allows offline functionality
-          console.warn("Profile check failed, using stored user data");
-          return user;
-        }
-      }
-
-      return null;
-    } catch (error) {
-      console.error("Error getting current user:", error);
-      return null;
-    }
-  }
-
-  static async logout(): Promise<void> {
-    try {
-      // Call logout API
-      const token = typeof window !== 'undefined' ? localStorage.getItem("auth_token") : null;
-      if (token) {
-        await fetch("/api/auth/logout", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${token}`
-          }
-        });
-      }
-    } catch (error) {
-      console.error("Logout API error:", error);
-    } finally {
-      // Always clear local storage
-      this.clearAuthData();
-    }
-  }
-
-  private static clearAuthData(): void {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem("auth_token");
-      localStorage.removeItem("user");
-    }
-  }
-
-  // Register method
-  static async register(userData: {
-    email: string;
-    password: string;
-    firstName: string;
-    lastName: string;
-  }): Promise<{ user: AuthUser | null; error: string | null }> {
+  static async register(
+    email: string,
+    password: string,
+    firstName: string,
+    lastName: string
+  ): Promise<{ user: AuthUser | null; error: string | null }> {
     try {
       const response = await fetch("/api/auth/register", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(userData),
+        body: JSON.stringify({ email, password, firstName, lastName }),
       });
 
       const data = await response.json();
@@ -166,30 +88,109 @@ export class AuthService {
         return { user: null, error: data.error || "Registration failed" };
       }
 
-      return { user: data.user, error: null };
+      if (data.success && data.user) {
+        return {
+          user: {
+            userId: data.user.userId || data.user.user_id,
+            email: data.user.email,
+            firstName: data.user.firstName || data.user.first_name,
+            lastName: data.user.lastName || data.user.last_name,
+            roles: data.user.roles || [],
+            status: data.user.status,
+          },
+          error: null,
+        };
+      }
+
+      return { user: null, error: "Registration failed" };
     } catch (error) {
       console.error("Registration error:", error);
       return { user: null, error: "Network error occurred" };
     }
   }
+
+  static async logout(): Promise<void> {
+    try {
+      // Call logout API
+      await fetch("/api/auth/logout", {
+        method: "POST",
+      });
+
+      // Clear token cookie (only in browser)
+      if (typeof window !== 'undefined') {
+        document.cookie = "auth-token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+        window.location.href = "/login";
+      }
+    } catch (error) {
+      console.error("Logout error:", error);
+      // Still clear the cookie even if API call fails
+      if (typeof window !== 'undefined') {
+        document.cookie = "auth-token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+        window.location.href = "/login";
+      }
+    }
+  }
+
+  static async getCurrentUser(): Promise<{ user: AuthUser | null; error: string | null }> {
+    try {
+      const response = await fetch("/api/auth/profile", {
+        method: "GET",
+        credentials: "include",
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        return { user: null, error: data.error || "Failed to get user" };
+      }
+
+      if (data.success && data.user) {
+        return {
+          user: {
+            userId: data.user.userId || data.user.user_id,
+            email: data.user.email,
+            firstName: data.user.firstName || data.user.first_name,
+            lastName: data.user.lastName || data.user.last_name,
+            roles: data.user.roles || [],
+            status: data.user.status,
+          },
+          error: null,
+        };
+      }
+
+      return { user: null, error: "User not found" };
+    } catch (error) {
+      console.error("Get current user error:", error);
+      return { user: null, error: "Network error occurred" };
+    }
+  }
 }
 
-// Server-side JWT verification function
+// JWT Verification for server-side use
 export function verifyJWT(request: NextRequest): { user: JWTPayload | null; error: string | null } {
   try {
-    const authHeader = request.headers.get("authorization");
+    const token = request.cookies.get("auth-token")?.value;
     
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return { user: null, error: "No valid authorization header" };
+    if (!token) {
+      return { user: null, error: "No authentication token" };
     }
 
-    const token = authHeader.substring(7); // Remove "Bearer " prefix
-    const jwtSecret = process.env.JWT_SECRET || "voteguard_secret_key_2024";
-    
-    const decoded = verify(token, jwtSecret) as JWTPayload;
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+      return { user: null, error: "JWT secret not configured" };
+    }
+
+    const decoded = verify(token, secret) as JWTPayload;
     return { user: decoded, error: null };
   } catch (error) {
     console.error("JWT verification error:", error);
-    return { user: null, error: "Invalid or expired token" };
+    return { user: null, error: "Invalid token" };
   }
 }
+
+// Helper function to check if user has required role
+export function hasRole(user: JWTPayload, requiredRole: string): boolean {
+  return user.roles.includes(requiredRole);
+}
+
+export default AuthService;

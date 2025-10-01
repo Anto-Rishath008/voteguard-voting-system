@@ -75,7 +75,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signIn = async (email: string, password: string) => {
     setLoading(true);
     try {
-      const result = await AuthService.loginWithSupabase(email, password);
+      const result = await AuthService.loginWithAzureDB(email, password);
 
       if (result.error) {
         throw new Error(result.error);

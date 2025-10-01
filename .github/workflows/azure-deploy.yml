@@ -49,10 +49,10 @@ jobs:
         publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
         package: .
 
-  database-migration:
+  database-health-check:
     runs-on: ubuntu-latest
     needs: build-and-deploy
-    if: github.ref == 'refs/heads/main'  # Re-enabled for Supabase
+    if: github.ref == 'refs/heads/main'
     
     steps:
     - name: 🔄 Checkout code
@@ -66,13 +66,18 @@ jobs:
     - name: 📦 Install dependencies
       run: npm install
 
-    - name: 🗄️ Run Azure Database migration
-      run: node azure-migration.js
+    - name: 🏥 Azure Database Health Check
+      run: |
+        node -e "
+        const { getDatabase } = require('./src/lib/enhanced-database.js');
+        const db = getDatabase();
+        db.testConnection()
+          .then(r => console.log('Database connection:', r ? 'SUCCESS' : 'FAILED'))
+          .catch(e => { console.error('Database error:', e); process.exit(1); });
+        "
       env:
         AZURE_DATABASE_URL: ${{ secrets.AZURE_DATABASE_URL }}
-        NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
-        SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         NODE_ENV: production
 
-    - name: ✅ Migration complete
-      run: echo "Database migration completed successfully!"
+    - name: ✅ Health check complete
+      run: echo "Azure Database health check completed successfully!"

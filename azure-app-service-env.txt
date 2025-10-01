@@ -39,7 +39,4 @@ ENABLE_QUERY_METRICS=true
 
 SLOW_QUERY_THRESHOLD=1000
 
-// Supabase (for migration source)
-NEXT_PUBLIC_SUPABASE_URL=https://feympezypmbcppxtgkbi.supabase.co
-
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZleW1wZXp5cG1iY3BweHRna2JpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczNTM4NDUxOCwiZXhwIjoyMDUwOTYwNTE4fQ.vPw8YJUCYl73y78LdHmEFcH1W28hUOSGkOl3LDOU5rE
+// Pure Azure Database for PostgreSQL - No External Dependencies

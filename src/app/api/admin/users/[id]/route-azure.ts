@@ -125,11 +125,14 @@ export async function DELETE(
   }
 }
 
-// PATCH /api/admin/users/[id] - Update user status or other fields
-export async function PATCH(
+// PUT /api/admin/users/[id] - Update a user
+export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
+  const db = getDatabase();
+  
   try {
     // Verify user authentication
     const { user: authUser, error: authError } = verifyJWT(request);
@@ -138,10 +141,7 @@ export async function PATCH(
     }
 
     // Check if user has admin permissions
-    const hasAdminPermission = await DatabaseUtils.checkUserRole(
-      authUser.userId,
-      "Admin"
-    );
+    const hasAdminPermission = await checkUserRole(authUser.userId, "Admin");
     if (!hasAdminPermission) {
       return NextResponse.json(
         { error: "Admin access required" },
@@ -149,72 +149,94 @@ export async function PATCH(
       );
     }
 
-    const userId = params.id;
-    if (!userId) {
+    const userId = id;
+    const body = await request.json();
+    const { email, firstName, lastName, role, status } = body;
+
+    if (!email || !firstName || !lastName) {
       return NextResponse.json(
-        { error: "User ID is required" },
+        { error: "Email, first name, and last name are required" },
         { status: 400 }
       );
     }
 
-    const body = await request.json();
-    const { status, first_name, last_name } = body;
-
-    const supabase = createAdminClient();
-
     // Check if user exists
-    const { data: existingUser, error: fetchError } = await supabase
-      .from("users")
-      .select("user_id, email, status")
-      .eq("user_id", userId)
-      .single();
+    const existingUser = await db.query(
+      `SELECT user_id, email FROM users WHERE user_id = $1`,
+      [userId]
+    );
 
-    if (fetchError || !existingUser) {
+    if (!existingUser.rows || existingUser.rows.length === 0) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    // Prepare update data
-    const updateData: any = {};
-    if (status && ["Active", "Inactive", "Suspended"].includes(status)) {
-      updateData.status = status;
-    }
-    if (first_name) {
-      updateData.first_name = first_name;
-    }
-    if (last_name) {
-      updateData.last_name = last_name;
-    }
+    // Update user information
+    const updateResult = await db.query(
+      `UPDATE users 
+       SET email = $1, first_name = $2, last_name = $3, status = COALESCE($4, status), updated_at = CURRENT_TIMESTAMP 
+       WHERE user_id = $5 
+       RETURNING user_id, email, first_name, last_name, status, created_at, updated_at`,
+      [email, firstName, lastName, status, userId]
+    );
 
-    if (Object.keys(updateData).length === 0) {
-      return NextResponse.json(
-        { error: "No valid fields to update" },
-        { status: 400 }
-      );
-    }
-
-    // Update the user
-    const { data: updatedUser, error: updateError } = await supabase
-      .from("users")
-      .update(updateData)
-      .eq("user_id", userId)
-      .select()
-      .single();
-
-    if (updateError) {
-      console.error("Error updating user:", updateError);
+    if (updateResult.rowCount === 0) {
       return NextResponse.json(
         { error: "Failed to update user" },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ 
+    const updatedUser = updateResult.rows[0];
+
+    // Update role if provided
+    if (role) {
+      // Remove existing roles
+      await db.query(
+        `DELETE FROM user_roles WHERE user_id = $1`,
+        [userId]
+      );
+
+      // Get role ID
+      const roleResult = await db.query(
+        `SELECT role_id FROM roles WHERE role_name = $1`,
+        [role]
+      );
+
+      if (roleResult.rows && roleResult.rows.length > 0) {
+        // Add new role
+        await db.query(
+          `INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)`,
+          [userId, roleResult.rows[0].role_id]
+        );
+      }
+    }
+
+    // Get updated user with roles
+    const userWithRoles = await db.query(
+      `SELECT u.user_id, u.email, u.first_name, u.last_name, u.status, u.created_at, u.updated_at,
+              COALESCE(array_agg(r.role_name) FILTER (WHERE r.role_name IS NOT NULL), '{}') as roles
+       FROM users u
+       LEFT JOIN user_roles ur ON u.user_id = ur.user_id
+       LEFT JOIN roles r ON ur.role_id = r.role_id
+       WHERE u.user_id = $1
+       GROUP BY u.user_id, u.email, u.first_name, u.last_name, u.status, u.created_at, u.updated_at`,
+      [userId]
+    );
+
+    // Log the update
+    await logAudit(authUser.userId, "UPDATE_USER", "USER", userId, {
+      updatedFields: { email, firstName, lastName, role, status },
+      updatedBy: authUser.email
+    });
+
+    return NextResponse.json({
+      success: true,
+      user: userWithRoles.rows[0],
       message: "User updated successfully",
-      user: updatedUser
     });
 
   } catch (error) {
-    console.error("Update user API error:", error);
+    console.error("Error updating user:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
@@ -222,11 +244,14 @@ export async function PATCH(
   }
 }
 
-// GET /api/admin/users/[id] - Get specific user details
+// GET /api/admin/users/[id] - Get user details
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
+  const db = getDatabase();
+  
   try {
     // Verify user authentication
     const { user: authUser, error: authError } = verifyJWT(request);
@@ -235,10 +260,7 @@ export async function GET(
     }
 
     // Check if user has admin permissions
-    const hasAdminPermission = await DatabaseUtils.checkUserRole(
-      authUser.userId,
-      "Admin"
-    );
+    const hasAdminPermission = await checkUserRole(authUser.userId, "Admin");
     if (!hasAdminPermission) {
       return NextResponse.json(
         { error: "Admin access required" },
@@ -246,59 +268,31 @@ export async function GET(
       );
     }
 
-    const userId = params.id;
-    if (!userId) {
-      return NextResponse.json(
-        { error: "User ID is required" },
-        { status: 400 }
-      );
-    }
+    const userId = id;
 
-    const supabase = createAdminClient();
+    // Get user with roles
+    const userResult = await db.query(
+      `SELECT u.user_id, u.email, u.first_name, u.last_name, u.status, u.last_login, u.created_at, u.updated_at,
+              COALESCE(array_agg(r.role_name) FILTER (WHERE r.role_name IS NOT NULL), '{}') as roles
+       FROM users u
+       LEFT JOIN user_roles ur ON u.user_id = ur.user_id
+       LEFT JOIN roles r ON ur.role_id = r.role_id
+       WHERE u.user_id = $1
+       GROUP BY u.user_id, u.email, u.first_name, u.last_name, u.status, u.last_login, u.created_at, u.updated_at`,
+      [userId]
+    );
 
-    // Get user details
-    const { data: userData, error: userError } = await supabase
-      .from("users")
-      .select(`
-        user_id,
-        email,
-        first_name,
-        last_name,
-        status,
-        last_login,
-        created_at
-      `)
-      .eq("user_id", userId)
-      .single();
-
-    if (userError || !userData) {
+    if (!userResult.rows || userResult.rows.length === 0) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    // Get user roles
-    const { data: rolesData, error: rolesError } = await supabase
-      .from("user_roles")
-      .select("role_name")
-      .eq("user_id", userId);
-
-    if (rolesError) {
-      console.error("Error fetching user roles:", rolesError);
-      return NextResponse.json(
-        { error: "Failed to fetch user roles" },
-        { status: 500 }
-      );
-    }
-
-    // Combine user data with roles
-    const user = {
-      ...userData,
-      roles: (rolesData || []).map((role: any) => role.role_name),
-    };
-
-    return NextResponse.json({ user });
+    return NextResponse.json({
+      success: true,
+      user: userResult.rows[0],
+    });
 
   } catch (error) {
-    console.error("Get user API error:", error);
+    console.error("Error fetching user:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
