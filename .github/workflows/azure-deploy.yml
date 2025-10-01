@@ -135,16 +135,29 @@ jobs:
     - name: 🏥 Azure Database Health Check
       run: |
         node -e "
+        const dbUrl = process.env.AZURE_DATABASE_URL;
+        if (!dbUrl) {
+          console.log('⚠️  AZURE_DATABASE_URL not configured - skipping database health check');
+          console.log('Note: Database connection will be tested during runtime');
+          process.exit(0);
+        }
+        
+        console.log('🔗 Testing Azure Database connection...');
         const { Client } = require('pg');
-        const client = new Client({ connectionString: process.env.AZURE_DATABASE_URL });
+        const client = new Client({ connectionString: dbUrl });
         client.connect()
-          .then(() => client.query('SELECT 1 as test'))
           .then(() => {
-            console.log('Database connection: SUCCESS');
+            console.log('✅ Database connection established');
+            return client.query('SELECT 1 as test');
+          })
+          .then(() => {
+            console.log('✅ Database query successful');
+            console.log('✅ Azure Database health check: SUCCESS');
             return client.end();
           })
           .catch(e => { 
-            console.error('Database error:', e.message); 
+            console.error('❌ Database error:', e.message);
+            console.error('❌ Connection string format should be: postgresql://user:password@host:port/database?sslmode=require');
             process.exit(1); 
           });
         "

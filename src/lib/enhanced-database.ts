@@ -330,17 +330,46 @@ let databaseInstance: EnhancedDatabase | null = null;
 
 export function getDatabase(): EnhancedDatabase {
     if (!databaseInstance) {
-        const config: DatabaseConfig = {
-            host: process.env.DB_HOST || 'localhost',
-            database: process.env.DB_NAME || 'postgres',
-            username: process.env.DB_USER || 'postgres',
-            password: process.env.DB_PASS || '',
-            port: parseInt(process.env.DB_PORT || '5432'),
-            ssl: process.env.DB_SSL === 'require' || process.env.NODE_ENV === 'production',
-            maxConnections: parseInt(process.env.DB_MAX_CONNECTIONS || '20'),
-            idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT || '30000'),
-            connectionTimeoutMillis: parseInt(process.env.DB_CONNECTION_TIMEOUT || '5000')
-        };
+        let config: DatabaseConfig;
+        
+        // Check if we have AZURE_DATABASE_URL (connection string format)
+        const connectionString = process.env.AZURE_DATABASE_URL || process.env.DATABASE_URL;
+        
+        if (connectionString) {
+            // Parse connection string format: postgresql://user:password@host:port/database
+            try {
+                const url = new URL(connectionString);
+                config = {
+                    host: url.hostname,
+                    database: url.pathname.slice(1), // Remove leading slash
+                    username: url.username,
+                    password: url.password,
+                    port: parseInt(url.port) || 5432,
+                    ssl: url.searchParams.get('sslmode') === 'require' || process.env.NODE_ENV === 'production',
+                    maxConnections: parseInt(process.env.DB_MAX_CONNECTIONS || '20'),
+                    idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT || '30000'),
+                    connectionTimeoutMillis: parseInt(process.env.DB_CONNECTION_TIMEOUT || '5000')
+                };
+                console.log('🔗 Using connection string for database config');
+            } catch (error) {
+                console.error('❌ Failed to parse connection string:', error);
+                throw new Error('Invalid database connection string format');
+            }
+        } else {
+            // Use individual environment variables (fallback)
+            config = {
+                host: process.env.DB_HOST || 'localhost',
+                database: process.env.DB_NAME || 'postgres',
+                username: process.env.DB_USER || 'postgres',
+                password: process.env.DB_PASS || '',
+                port: parseInt(process.env.DB_PORT || '5432'),
+                ssl: process.env.DB_SSL === 'require' || process.env.NODE_ENV === 'production',
+                maxConnections: parseInt(process.env.DB_MAX_CONNECTIONS || '20'),
+                idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT || '30000'),
+                connectionTimeoutMillis: parseInt(process.env.DB_CONNECTION_TIMEOUT || '5000')
+            };
+            console.log('🔧 Using individual environment variables for database config');
+        }
         
         databaseInstance = new EnhancedDatabase(config);
     }
