@@ -135,11 +135,18 @@ jobs:
     - name: 🏥 Azure Database Health Check
       run: |
         node -e "
-        const { getDatabase } = require('./src/lib/enhanced-database.js');
-        const db = getDatabase();
-        db.testConnection()
-          .then(r => console.log('Database connection:', r ? 'SUCCESS' : 'FAILED'))
-          .catch(e => { console.error('Database error:', e); process.exit(1); });
+        const { Client } = require('pg');
+        const client = new Client({ connectionString: process.env.AZURE_DATABASE_URL });
+        client.connect()
+          .then(() => client.query('SELECT 1 as test'))
+          .then(() => {
+            console.log('Database connection: SUCCESS');
+            return client.end();
+          })
+          .catch(e => { 
+            console.error('Database error:', e.message); 
+            process.exit(1); 
+          });
         "
       env:
         AZURE_DATABASE_URL: ${{ secrets.AZURE_DATABASE_URL }}

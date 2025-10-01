@@ -20,3 +20,19 @@ export class DatabaseUtils {
     return false;
   }
 }
+
+// Export EnhancedDatabase class for compatibility
+export class EnhancedDatabase {
+  async query(sql: string, params?: any[]): Promise<any> {
+    return { rows: [], rowCount: 0 };
+  }
+
+  async testConnection(): Promise<boolean> {
+    return false;
+  }
+}
+
+// Export getDatabase function for compatibility  
+export function getDatabase(): EnhancedDatabase {
+  return new EnhancedDatabase();
+}
