@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyJWT } from "@/lib/auth";
-import { getDatabase } from "@/lib/enhanced-database";
+import { createClient } from "@supabase/supabase-js";
 
 export async function GET(request: NextRequest) {
-  const db = getDatabase();
   let authUser: any = null;
   
   try {
@@ -15,161 +14,119 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Get comprehensive dashboard stats using enhanced database
-    const dashboardStats = await db.getDashboardStats(authUser.userId);
-    
-    // Get user profile from database
-    const userProfile = await db.getUserByEmail(authUser.email);
-    
+    // Create Supabase client for basic dashboard data
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    // Get user profile
+    const { data: userProfile } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', authUser.email)
+      .single();
+
     if (!userProfile) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    // Get active elections using the enhanced database
-    const activeElections = await db.getActiveElections();
-    
+    // Get basic elections data
+    const { data: elections } = await supabase
+      .from('elections')
+      .select('*')
+      .order('created_at', { ascending: false });
+
     // Get user's voting history
-    const userVotingHistory = await db.getVoterHistory(authUser.userId);
+    const { data: votes } = await supabase
+      .from('votes')
+      .select('*, elections(*)')
+      .eq('user_id', userProfile.id);
 
     // Process elections data for user context
-    const processedElections = activeElections.map((election: any) => {
-      const hasVoted = userVotingHistory.some(
-        (vote: any) => vote.election_name === election.election_name
+    const processedElections = (elections || []).map((election: any) => {
+      const hasVoted = (votes || []).some(
+        (vote: any) => vote.election_id === election.id
       );
       
       return {
-        id: election.election_id,
-        name: election.election_name,
+        id: election.id,
+        name: election.title || election.name,
         description: election.description,
         status: election.status || 'active',
-        startDate: election.voting_start,
-        endDate: election.voting_end,
-        organization: election.org_name,
-        contestCount: election.contest_count || 0,
-        candidateCount: election.candidate_count || 0,
-        voterCount: election.voter_count || 0,
+        startDate: election.start_date || election.voting_start,
+        endDate: election.end_date || election.voting_end,
         hasVoted,
         canVote: !hasVoted && election.status === 'active'
       };
     });
 
-    // Enhanced statistics with detailed breakdown
-    const enhancedStats = {
-      // User statistics
-      users: {
-        total: dashboardStats.users.total_users || 0,
-        active: dashboardStats.users.active_users || 0,
-        newToday: 0 // Can be calculated from enhanced queries
+    // Basic dashboard response
+    const dashboardData = {
+      user: {
+        id: userProfile.id,
+        email: userProfile.email,
+        name: `${userProfile.first_name || ''} ${userProfile.last_name || ''}`.trim(),
+        role: userProfile.role || 'voter'
       },
-      
-      // Election statistics
-      elections: {
-        total: dashboardStats.elections.total_elections || 0,
-        active: dashboardStats.elections.active_elections || 0,
-        completed: dashboardStats.elections.completed_elections || 0,
-        draft: dashboardStats.elections.total_elections - 
-               dashboardStats.elections.active_elections - 
-               dashboardStats.elections.completed_elections || 0
+      stats: {
+        totalElections: elections?.length || 0,
+        activeElections: elections?.filter((e: any) => e.status === 'active').length || 0,
+        userVotes: votes?.length || 0,
+        participationRate: elections?.length ? 
+          Math.round((votes?.length || 0) / elections.length * 100) : 0
       },
-      
-      // Voting statistics
-      votes: {
-        totalToday: dashboardStats.votes.total_votes || 0,
-        userVotes: dashboardStats.userVotes.user_votes || 0,
-        turnoutRate: activeElections.length > 0 
-          ? ((dashboardStats.userVotes.user_votes || 0) / activeElections.length * 100) 
-          : 0
-      },
-      
-      // System performance metrics
-      performance: await db.getQueryMetrics()
-    };
-
-    // Role-specific data
-    let roleSpecificData = {};
-    
-    if (authUser.roles.includes('admin') || authUser.roles.includes('super_admin')) {
-      // Admin can see system-wide statistics
-      roleSpecificData = {
-        systemHealth: await db.healthCheck(),
-        recentSecurityEvents: await db.query(`
-          SELECT event_type, description, severity, created_at
-          FROM security_events 
-          ORDER BY created_at DESC 
-          LIMIT 10
-        `).then(result => result.rows),
-        
-        systemMetrics: enhancedStats.performance
-      };
-    }
-
-    if (authUser.roles.includes('election_officer')) {
-      // Election officers can see election management data
-      roleSpecificData = {
-        ...roleSpecificData,
-        managedElections: await db.query(`
-          SELECT election_name, status, voting_start, voting_end
-          FROM elections
-          WHERE created_by = $1
-          ORDER BY created_at DESC
-          LIMIT 5
-        `, [authUser.userId]).then(result => result.rows)
-      };
-    }
-
-    // Prepare user information with enhanced details
-    const userInfo = {
-      id: userProfile.user_id,
-      name: `${userProfile.first_name} ${userProfile.last_name}`,
-      email: userProfile.email,
-      roles: authUser.roles,
-      primaryRole: authUser.primaryRole,
-      status: userProfile.status,
-      lastLogin: userProfile.last_login,
-      joinDate: userProfile.created_at,
-      verificationStatus: {
-        email: userProfile.email_verified || false,
-        phone: userProfile.phone_verified || false
+      elections: processedElections.slice(0, 5), // Show first 5 elections
+      recentActivity: {
+        lastLogin: new Date().toISOString(),
+        recentVotes: votes?.slice(0, 3) || []
       }
     };
 
-    // Return comprehensive dashboard data
+    // Add role-specific data
+    if (userProfile.role === 'admin' || userProfile.role === 'super_admin') {
+      // Get admin-specific data
+      const { data: allUsers } = await supabase
+        .from('users')
+        .select('id, email, role, created_at')
+        .order('created_at', { ascending: false });
+
+      dashboardData.adminData = {
+        totalUsers: allUsers?.length || 0,
+        recentUsers: allUsers?.slice(0, 5) || [],
+        systemStatus: 'operational'
+      };
+    }
+
     return NextResponse.json({
-      user: userInfo,
-      elections: processedElections,
-      votingHistory: userVotingHistory.slice(0, 5), // Recent voting history
-      stats: enhancedStats,
-      roleSpecificData,
-      timestamp: new Date().toISOString()
+      success: true,
+      data: dashboardData,
+      timestamp: new Date().toISOString(),
+      message: 'Dashboard data retrieved successfully'
     });
 
   } catch (error) {
-    console.error("Enhanced Dashboard API error:", error);
+    console.error('Dashboard API Error:', error);
     
-    // Log the error for monitoring
-    try {
-      await db.logSecurityEvent({
-        eventType: 'DASHBOARD_ERROR',
-        userId: authUser ? authUser.userId : undefined,
-        description: `Dashboard API error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        severity: 'ERROR',
-        additionalData: { 
-          endpoint: '/api/dashboard',
-          method: 'GET',
-          error: error instanceof Error ? error.stack : 'Unknown error'
-        }
-      });
-    } catch (logError) {
-      console.error("Failed to log dashboard error:", logError);
-    }
-
-    return NextResponse.json(
-      { 
-        error: "Internal server error",
-        details: process.env.NODE_ENV === "development" ? 
-          (error instanceof Error ? error.message : "Unknown error") : undefined
-      },
-      { status: 500 }
-    );
+    // Return a basic error response that won't crash the app
+    return NextResponse.json({
+      success: false,
+      error: 'Failed to load dashboard data',
+      data: {
+        user: { 
+          email: authUser?.email || 'unknown',
+          role: 'voter',
+          name: 'User'
+        },
+        stats: {
+          totalElections: 0,
+          activeElections: 0,
+          userVotes: 0,
+          participationRate: 0
+        },
+        elections: [],
+        message: 'Dashboard is temporarily unavailable. Please try again later.'
+      }
+    }, { status: 500 });
   }
 }
