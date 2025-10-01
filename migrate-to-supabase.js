@@ -6,6 +6,7 @@
  */
 
 const { createClient } = require('@supabase/supabase-js');
+const bcrypt = require('bcryptjs');
 
 // Configuration
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -89,35 +90,58 @@ async function migrateSupabase() {
       console.log('✅ Database connection successful!');
     }
 
-    // Check if we have test users
-    const { data: existingUsers, error: usersError } = await supabase
+    // Delete existing test users first (to ensure clean setup with passwords)
+    console.log('🧹 Cleaning up existing test users...');
+    
+    // Get existing user IDs first
+    const { data: existingUsers } = await supabase
       .from('users')
-      .select('email')
+      .select('user_id')
       .in('email', ['voter@voteguard.com', 'admin@voteguard.com', 'superadmin@voteguard.com']);
+    
+    if (existingUsers && existingUsers.length > 0) {
+      const userIds = existingUsers.map(u => u.user_id);
+      
+      // Delete user roles first (foreign key constraint)
+      await supabase.from('user_roles').delete().in('user_id', userIds);
+      
+      // Then delete users
+      await supabase
+        .from('users')
+        .delete()
+        .in('email', ['voter@voteguard.com', 'admin@voteguard.com', 'superadmin@voteguard.com']);
+    }
 
-    if (!usersError && existingUsers && existingUsers.length === 0) {
+    // Always create fresh test users with passwords
       console.log('👤 Adding test users...');
       
-      // Note: In a real migration, you'd hash passwords properly
-      // For now, we'll add users without passwords and let them be set via the app
+      // Create test users with hashed passwords
+      const defaultPassword = 'password123'; // Simple password for testing
+      const hashedPassword = await bcrypt.hash(defaultPassword, 10);
+      
+      console.log('🔐 Creating test users with password:', defaultPassword);
+      
       const testUsers = [
         {
           email: 'voter@voteguard.com',
           first_name: 'Test',
           last_name: 'Voter',
-          status: 'Active'
+          status: 'Active',
+          password_hash: hashedPassword
         },
         {
           email: 'admin@voteguard.com',  
           first_name: 'Test',
           last_name: 'Admin',
-          status: 'Active'
+          status: 'Active',
+          password_hash: hashedPassword
         },
         {
           email: 'superadmin@voteguard.com',
           first_name: 'Test',
           last_name: 'SuperAdmin', 
-          status: 'Active'
+          status: 'Active',
+          password_hash: hashedPassword
         }
       ];
 
@@ -149,9 +173,6 @@ async function migrateSupabase() {
           }
         }
       }
-    } else {
-      console.log('👤 Test users already exist, skipping user creation');
-    }
 
     console.log('🎉 Supabase migration completed successfully!');
 
