@@ -21,18 +21,11 @@ export class DatabaseUtils {
   }
 }
 
-// Export EnhancedDatabase class for compatibility
-export class EnhancedDatabase {
-  async query(sql: string, params?: any[]): Promise<any> {
-    return { rows: [], rowCount: 0 };
-  }
+// Import the real enhanced database
+import { getDatabase as getRealDatabase } from './enhanced-database';
 
-  async testConnection(): Promise<boolean> {
-    return false;
-  }
-}
+// Export the real getDatabase function
+export const getDatabase = getRealDatabase;
 
-// Export getDatabase function for compatibility  
-export function getDatabase(): EnhancedDatabase {
-  return new EnhancedDatabase();
-}
+// Re-export EnhancedDatabase class for compatibility
+export { EnhancedDatabase } from './enhanced-database';

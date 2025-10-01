@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase";
+import { getDatabase } from "@/lib/enhanced-database";
 import { verifyJWT } from "@/lib/auth";
 
 export async function GET(request: NextRequest) {
@@ -11,107 +11,87 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const supabase = createAdminClient();
+    const db = getDatabase();
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status");
     const page = parseInt(searchParams.get("page") || "1");
     const limit = parseInt(searchParams.get("limit") || "10");
     const offset = (page - 1) * limit;
 
-    // Build query
-    let query = supabase.from("elections").select(`
-        election_id,
-        election_name,
-        description,
-        status,
-        start_date,
-        end_date,
-        creator,
-        contests (
-          contest_id,
-          contest_title,
-          contest_type,
-          candidates (
-            candidate_id,
-            candidate_name,
-            party
-          )
-        )
-      `);
+    // Build base query
+    let baseQuery = `
+      SELECT 
+        e.election_id,
+        e.election_name,
+        e.description,
+        e.status,
+        e.start_date,
+        e.end_date,
+        e.creator,
+        e.created_at,
+        e.updated_at,
+        COUNT(c.contest_id) as contest_count
+      FROM elections e
+      LEFT JOIN contests c ON e.election_id = c.election_id
+    `;
+    
+    let whereClause = '';
+    let params: any[] = [];
+    let paramIndex = 1;
 
+    // Add status filter if provided
     if (status) {
-      query = query.eq("status", status);
+      whereClause = ` WHERE e.status = $${paramIndex}`;
+      params.push(status);
+      paramIndex++;
     }
 
-    // Get elections with pagination
-    const {
-      data: electionsData,
-      error,
-      count,
-    } = await query
-      .range(offset, offset + limit - 1)
-      .order("created_at", { ascending: false });
+    // Complete the query
+    const query = `
+      ${baseQuery}
+      ${whereClause}
+      GROUP BY e.election_id, e.election_name, e.description, e.status, e.start_date, e.end_date, e.creator, e.created_at, e.updated_at
+      ORDER BY e.created_at DESC
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+    `;
+    
+    params.push(limit, offset);
 
-    if (error) {
-      console.error("Error fetching elections:", error);
-      return NextResponse.json(
-        { error: "Failed to fetch elections" },
-        { status: 500 }
-      );
+    console.log("Executing elections query:", query, "with params:", params);
+    
+    const result = await db.query(query, params);
+    
+    // Get total count for pagination
+    let countQuery = `SELECT COUNT(*) as total FROM elections e`;
+    let countParams: any[] = [];
+    
+    if (status) {
+      countQuery += ` WHERE e.status = $1`;
+      countParams.push(status);
     }
+    
+    const countResult = await db.query(countQuery, countParams);
+    const total = parseInt(countResult.rows[0].total);
 
-    // Process elections to match frontend expectations
-    const elections = await Promise.all(
-      (electionsData || []).map(async (election: any) => {
-        // Get total votes for this election (as a proxy for eligible voters)
-        const { count: totalVotes } = await supabase
-          .from("votes")
-          .select("*", { count: "exact" })
-          .eq("election_id", election.election_id);
-
-        // Check if current user has voted
-        const { data: userVote } = await supabase
-          .from("votes")
-          .select("vote_id")
-          .eq("election_id", election.election_id)
-          .eq("user_id", authUser.userId)
-          .single();
-
-        // Determine vote status
-        let myVoteStatus = "not_voted";
-        if (userVote) {
-          myVoteStatus = "voted";
-        }
-
-        return {
-          id: election.election_id,
-          title: election.election_name,
-          description: election.description,
-          status: election.status,
-          startDate: election.start_date,
-          endDate: election.end_date,
-          totalVoters: totalVotes || 0,
-          contests: election.contests || [],
-          myVoteStatus: myVoteStatus,
-          hasVoted: !!userVote,
-          canVote: election.status === "Active" && !userVote,
-        };
-      })
-    );
+    console.log(`Found ${result.rows.length} elections, total: ${total}`);
 
     return NextResponse.json({
-      elections,
+      elections: result.rows,
       pagination: {
         page,
         limit,
-        total: count || 0,
-        totalPages: Math.ceil((count || 0) / limit),
-      },
+        total,
+        totalPages: Math.ceil(total / limit)
+      }
     });
+
   } catch (error) {
     console.error("Elections API error:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { 
+        error: "Internal server error", 
+        message: error instanceof Error ? error.message : "Unknown error"
+      },
       { status: 500 }
     );
   }
@@ -119,105 +99,79 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // Verify JWT token
+    // Verify JWT token and check permissions
     const { user: authUser, error: authError } = verifyJWT(request);
 
     if (authError || !authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Check if user has Admin role
-    if (
-      !authUser.roles.includes("Admin") &&
-      !authUser.roles.includes("SuperAdmin")
-    ) {
-      return NextResponse.json(
-        { error: "Insufficient permissions. Admin role required." },
-        { status: 403 }
-      );
+    const db = getDatabase();
+    
+    // Check if user has admin privileges
+    const roleResult = await db.query(`
+      SELECT r.role_name 
+      FROM user_roles ur 
+      JOIN roles r ON ur.role_id = r.role_id 
+      WHERE ur.user_id = $1 AND r.role_name IN ('admin', 'super_admin')
+    `, [authUser.userId]);
+
+    if (roleResult.rows.length === 0) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 
-    const supabase = createAdminClient();
     const body = await request.json();
-    const {
-      electionName,
-      description,
-      startDate,
-      endDate,
-      contests,
-      jurisdictions,
+    const { 
+      election_name, 
+      description, 
+      start_date, 
+      end_date, 
+      status = 'draft' 
     } = body;
 
     // Validate required fields
-    if (!electionName || !startDate || !endDate) {
+    if (!election_name || !description || !start_date || !end_date) {
       return NextResponse.json(
-        { error: "Missing required fields" },
+        { error: "Missing required fields: election_name, description, start_date, end_date" },
         { status: 400 }
       );
     }
 
-    // Create election
-    const { data: election, error: electionError } = await supabase
-      .from("elections")
-      .insert({
-        election_name: electionName,
-        description,
-        start_date: startDate,
-        end_date: endDate,
-        creator: authUser.userId,
-        status: "Draft",
-      })
-      .select()
-      .single();
+    // Create the election
+    const insertResult = await db.query(`
+      INSERT INTO elections (election_name, description, start_date, end_date, status, creator, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+      RETURNING *
+    `, [election_name, description, start_date, end_date, status, authUser.userId]);
 
-    if (electionError) {
-      console.error("Error creating election:", electionError);
-      return NextResponse.json(
-        { error: "Failed to create election" },
-        { status: 500 }
-      );
-    }
+    const newElection = insertResult.rows[0];
 
-    // Create contests if provided
-    if (contests && contests.length > 0) {
-      const contestsToInsert = contests.map((contest: any, index: number) => ({
-        contest_id: index + 1,
-        election_id: election.election_id,
-        contest_title: contest.title,
-        contest_type: contest.type,
-      }));
+    // Create audit log
+    await db.query(`
+      INSERT INTO audit_log (user_id, operation, resource_type, resource_id, details, timestamp)
+      VALUES ($1, $2, $3, $4, $5, NOW())
+    `, [
+      authUser.userId,
+      'CREATE',
+      'election',
+      newElection.election_id,
+      `Created election: ${election_name}`
+    ]);
 
-      const { error: contestsError } = await supabase
-        .from("contests")
-        .insert(contestsToInsert);
+    console.log("Created new election:", newElection.election_id);
 
-      if (contestsError) {
-        console.error("Error creating contests:", contestsError);
-        // Continue with election creation even if contests fail
-      }
-    }
+    return NextResponse.json({
+      message: "Election created successfully",
+      election: newElection
+    }, { status: 201 });
 
-    // Link to jurisdictions if provided
-    if (jurisdictions && jurisdictions.length > 0) {
-      const jurisdictionLinks = jurisdictions.map((jurisdictionId: number) => ({
-        election_id: election.election_id,
-        jurisdiction_id: jurisdictionId,
-      }));
-
-      const { error: jurisdictionError } = await supabase
-        .from("election_jurisdictions")
-        .insert(jurisdictionLinks);
-
-      if (jurisdictionError) {
-        console.error("Error linking jurisdictions:", jurisdictionError);
-      }
-    }
-
-    return NextResponse.json({ election }, { status: 201 });
   } catch (error) {
     console.error("Create election error:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { 
+        error: "Internal server error", 
+        message: error instanceof Error ? error.message : "Unknown error"
+      },
       { status: 500 }
     );
   }
