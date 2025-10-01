@@ -1,33 +1,75 @@
-# VoteGuard - Secure Voting System
+# VoteGuard - Enterprise Voting System
 
-A comprehensive, secure voting system built with Next.js, TypeScript, and PostgreSQL. This system provides role-based access control for voters, administrators, and super administrators with real-time election management and audit capabilities.
+A comprehensive, enterprise-grade voting system built with Next.js, TypeScript, and Azure Database for PostgreSQL. This system demonstrates advanced Database Management System concepts with role-based access control, real-time election management, comprehensive audit capabilities, and enterprise-level security features.
 
-## 🚀 Features
+## 🎓 Database Management System Project
 
-- **Role-Based Authentication**: Support for Voters, Admins, and Super Admins
-- **Election Management**: Create, manage, and monitor elections
-- **Secure Voting**: Encrypted vote storage with audit trails
-- **Real-time Results**: Live election results and analytics
-- **Admin Dashboard**: Comprehensive election and user management
-- **Audit Logging**: Complete activity tracking for security compliance
-- **Responsive Design**: Mobile-friendly interface with Tailwind CSS
+This project showcases advanced database concepts for academic excellence:
+- **Advanced Data Modeling**: Comprehensive ER design with 3NF normalization
+- **ACID Compliance**: Full transaction management with consistency guarantees
+- **Enterprise Security**: Multi-layered security with RBAC, audit trails, encryption
+- **Performance Optimization**: Strategic indexing, connection pooling, query monitoring
+- **Cloud Architecture**: Azure Database for PostgreSQL with scalable design
+- **Professional Documentation**: Complete technical documentation and deployment guides
 
-## 🛠 Tech Stack
+## 🚀 Enhanced Features
+
+### Core Functionality
+- **Role-Based Authentication**: Voters, Admins, Super Admins with granular permissions
+- **Election Management**: Complete lifecycle management with advanced controls
+- **Secure Voting**: Multi-layered encryption with integrity verification
+- **Real-time Analytics**: Live results with performance metrics
+- **Advanced Dashboard**: Comprehensive statistics and monitoring
+
+### Enterprise Features
+- **Audit Logging**: Complete trail of all system operations
+- **Security Monitoring**: Real-time threat detection and response
+- **Performance Metrics**: Query optimization and database monitoring
+- **Connection Pooling**: Efficient resource management and scalability
+- **Data Encryption**: Advanced encryption at rest and in transit
+- **Account Security**: Multi-factor authentication with lockout protection
+
+## 🛠 Enterprise Tech Stack
 
 - **Frontend**: Next.js 15, React 19, TypeScript
-- **Styling**: Tailwind CSS
-- **Database**: PostgreSQL (Supabase/Azure)
-- **Authentication**: JWT with bcrypt
+- **Styling**: Tailwind CSS with responsive design
+- **Database**: Azure Database for PostgreSQL Flexible Server
+- **Authentication**: JWT with bcrypt, multi-layered security
+- **Database Library**: Custom enhanced PostgreSQL library with pooling
 - **Icons**: Lucide React
-- **Deployment**: Azure App Service
+- **Deployment**: Azure App Service with CI/CD pipeline
+- **Monitoring**: Built-in performance and security monitoring
 
 ## 📋 Prerequisites
 
 - Node.js 18+ and npm
-- PostgreSQL database
+- Azure subscription (for Azure Database for PostgreSQL)
 - Git
+- Azure CLI (for database setup)
 
-## 🚀 Getting Started
+## 🗄️ Enhanced Database Architecture
+
+### Core Tables (8 Tables)
+- **users**: User management with role-based access
+- **user_roles**: Flexible role assignment system
+- **organizations**: Multi-tenant organization support
+- **elections**: Comprehensive election management
+- **contests**: Individual voting contests within elections
+- **candidates**: Candidate management with metadata
+- **votes**: Secure vote storage with encryption
+- **audit_logs**: Complete audit trail for compliance
+- **security_events**: Security monitoring and threat detection
+- **voter_eligibility**: Advanced voter verification system
+
+### Advanced Database Features
+- **Stored Procedures**: Complex business logic in database
+- **Triggers**: Automated audit logging and data validation
+- **Views**: Optimized reporting and analytics queries
+- **Strategic Indexes**: Performance optimization for key operations
+- **Connection Pooling**: Efficient resource management
+- **Transaction Management**: ACID compliance with rollback support
+
+## 🚀 Quick Start (Azure Database)
 
 ### 1. Clone the repository
 ```bash
@@ -40,23 +82,30 @@ cd voting-system
 npm install
 ```
 
-### 3. Environment Setup
-Create a `.env.local` file in the root directory:
-```env
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-JWT_SECRET=your_jwt_secret
-DATABASE_URL=your_database_url
+### 3. Azure Database Setup
+Follow the comprehensive setup guide:
+```bash
+# See docs/AZURE_MIGRATION_GUIDE.md for detailed instructions
 ```
 
-### 4. Database Setup
-Run the database schema and seed files:
+### 4. Environment Configuration
+Copy the Azure environment template:
 ```bash
-# Initialize database schema
-psql -d your_database -f src/database/schema.sql
+cp .env.azure .env.local
+```
 
-# Seed initial data (optional)
-psql -d your_database -f src/database/seed.sql
+Update with your Azure Database credentials:
+```env
+AZURE_DATABASE_URL=postgresql://username:password@server.postgres.database.azure.com:5432/database?sslmode=require
+DB_MAX_CONNECTIONS=20
+ENABLE_AUDIT_LOGGING=true
+ENABLE_SECURITY_MONITORING=true
+```
+
+### 5. Database Migration
+Run the enhanced migration script:
+```bash
+node azure-migration.js
 ```
 
 ### 5. Run the development server

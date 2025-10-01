@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sign } from "jsonwebtoken";
-import { Client } from "pg";
 import bcrypt from "bcryptjs";
+import { getDatabase } from "@/lib/enhanced-database";
 
 export async function POST(request: NextRequest) {
+  const db = getDatabase();
+  
   try {
     const body = await request.json();
     const { email, password } = body;
@@ -16,43 +18,65 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create direct PostgreSQL client
-    const client = new Client({
-      connectionString: process.env.DATABASE_URL,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-    });
-    
-    if (!process.env.DATABASE_URL) {
-      return NextResponse.json(
-        { error: "Database configuration missing" },
-        { status: 500 }
-      );
-    }
+    // Get client IP for security logging
+    const clientIP = request.headers.get('x-forwarded-for') || 
+                     request.headers.get('x-real-ip') || 
+                     'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
 
     try {
-      await client.connect();
+      // Find user by email using enhanced database
+      const user = await db.getUserByEmail(email);
 
-      // Find user by email in the database
-      const userQuery = `
-        SELECT user_id, email, password_hash, first_name, last_name, status 
-        FROM users 
-        WHERE LOWER(email) = LOWER($1)
-      `;
-      const userResult = await client.query(userQuery, [email]);
+      if (!user) {
+        // Log failed login attempt
+        await db.logSecurityEvent({
+          eventType: 'FAILED_LOGIN_ATTEMPT',
+          description: `Failed login attempt for email: ${email}`,
+          severity: 'WARNING',
+          ipAddress: clientIP,
+          userAgent: userAgent
+        });
 
-      if (userResult.rows.length === 0) {
         return NextResponse.json(
           { error: "Invalid email or password" },
           { status: 401 }
         );
       }
 
-      const user = userResult.rows[0];
+      // Check if account is locked
+      if (user.locked_until && new Date(user.locked_until) > new Date()) {
+        await db.logSecurityEvent({
+          eventType: 'LOCKED_ACCOUNT_ACCESS',
+          userId: user.user_id,
+          description: `Login attempt on locked account: ${email}`,
+          severity: 'ERROR',
+          ipAddress: clientIP,
+          userAgent: userAgent
+        });
+
+        return NextResponse.json(
+          { error: "Account is temporarily locked due to multiple failed attempts" },
+          { status: 423 }
+        );
+      }
 
       // Verify password
       const isPasswordValid = await bcrypt.compare(password, user.password_hash);
       
       if (!isPasswordValid) {
+        // Update failed login attempts
+        await db.updateUserLoginAttempt(user.user_id, false);
+        
+        await db.logSecurityEvent({
+          eventType: 'FAILED_LOGIN_ATTEMPT',
+          userId: user.user_id,
+          description: `Invalid password for user: ${email}`,
+          severity: 'WARNING',
+          ipAddress: clientIP,
+          userAgent: userAgent
+        });
+
         return NextResponse.json(
           { error: "Invalid email or password" },
           { status: 401 }
@@ -60,24 +84,39 @@ export async function POST(request: NextRequest) {
       }
 
       // Check if user is active
-      if (user.status !== "Active") {
+      if (user.status !== "active") {
+        await db.logSecurityEvent({
+          eventType: 'INACTIVE_ACCOUNT_ACCESS',
+          userId: user.user_id,
+          description: `Login attempt on inactive account: ${email}`,
+          severity: 'WARNING',
+          ipAddress: clientIP,
+          userAgent: userAgent
+        });
+
         return NextResponse.json(
           { error: "Account is not active" },
           { status: 403 }
         );
       }
 
-      // Get user roles
-      const rolesQuery = `
-        SELECT role 
-        FROM user_roles 
-        WHERE user_id = $1
-      `;
-      const rolesResult = await client.query(rolesQuery, [user.user_id]);
+      // Successful login - update login attempts and last login
+      await db.updateUserLoginAttempt(user.user_id, true);
 
-      const roles = rolesResult.rows.map(r => r.role) || ["voter"];
+      // Log successful login
+      await db.logSecurityEvent({
+        eventType: 'SUCCESSFUL_LOGIN',
+        userId: user.user_id,
+        description: `Successful login for user: ${email}`,
+        severity: 'INFO',
+        ipAddress: clientIP,
+        userAgent: userAgent
+      });
+
+      const roles = user.roles || ["voter"];
       const primaryRole = roles.includes("super_admin") ? "super_admin" : 
-                        roles.includes("admin") ? "admin" : "voter";
+                        roles.includes("admin") ? "admin" : 
+                        roles.includes("election_officer") ? "election_officer" : "voter";
 
       // Generate JWT token
       const jwtSecret = process.env.JWT_SECRET || "voteguard_secret_key_2024";
@@ -98,18 +137,32 @@ export async function POST(request: NextRequest) {
         user: {
           id: user.user_id,
           email: user.email,
-          role: primaryRole,
-          roles: roles,
           firstName: user.first_name,
           lastName: user.last_name,
+          roles: roles,
+          role: primaryRole,
           fullName: `${user.first_name} ${user.last_name}`
         },
-        token,
+        token: token,
         message: "Login successful"
       });
 
-    } finally {
-      await client.end();
+    } catch (dbError) {
+      console.error("Database error during login:", dbError);
+      
+      await db.logSecurityEvent({
+        eventType: 'LOGIN_DATABASE_ERROR',
+        description: `Database error during login for email: ${email}`,
+        severity: 'ERROR',
+        ipAddress: clientIP,
+        userAgent: userAgent,
+        additionalData: { error: dbError instanceof Error ? dbError.message : 'Unknown error' }
+      });
+
+      return NextResponse.json(
+        { error: "Internal server error" },
+        { status: 500 }
+      );
     }
 
   } catch (error) {
