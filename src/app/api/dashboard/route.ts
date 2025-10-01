@@ -20,8 +20,8 @@ export async function GET(request: NextRequest) {
       status: "Active"
     };
 
-    // Mock elections data for testing
-    const elections = [
+    // Mock elections data for testing (fallback only)
+    const mockElections = [
       {
         id: "1",
         name: "Student Council Election 2025",
