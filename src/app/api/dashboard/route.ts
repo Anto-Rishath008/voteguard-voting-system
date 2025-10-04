@@ -6,11 +6,16 @@ export async function GET(request: NextRequest) {
   let authUser: any = null;
   
   try {
+    console.log('🚀 Dashboard API called');
+    
     // Verify JWT token
     const { user: authUserData, error: authError } = verifyJWT(request);
     authUser = authUserData;
 
+    console.log('🔐 Auth check:', { hasUser: !!authUserData, error: authError });
+
     if (authError || !authUser) {
+      console.log('❌ Authentication failed');
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -34,13 +39,19 @@ export async function GET(request: NextRequest) {
     }
 
     // Get comprehensive dashboard stats using Azure Database
+    console.log('📊 Getting dashboard stats for user:', userProfile.user_id);
     const dashboardStats = await db.getDashboardStats(userProfile.user_id);
+    console.log('📈 Dashboard stats:', dashboardStats);
     
     // Get active elections using Azure Database
+    console.log('🗳️  Getting active elections');
     const activeElections = await db.getActiveElections();
+    console.log('🎯 Active elections count:', activeElections.length);
     
     // Get user's voting history
+    console.log('📋 Getting user voting history');
     const userVotingHistory = await db.getVoterHistory(userProfile.user_id);
+    console.log('🗳️  User voting history count:', userVotingHistory.length);
 
     // Process elections data for user context
     const processedElections = activeElections.map((election: any) => {
@@ -73,23 +84,32 @@ export async function GET(request: NextRequest) {
         role: userProfile.role
       },
       stats: {
+        // Voter Dashboard expects these flat properties - convert strings to numbers
+        totalElections: parseInt(dashboardStats.elections.total_elections) || 0,
+        activeElections: parseInt(dashboardStats.elections.active_elections) || 0,
+        votedElections: parseInt(dashboardStats.userVotes.user_votes) || 0,
+        upcomingElections: (parseInt(dashboardStats.elections.draft_elections) || 0) + 
+                          (parseInt(dashboardStats.elections.scheduled_elections) || 0),
+        
+        // Keep nested structure for admin dashboards compatibility
         users: {
-          total: dashboardStats.users.total_users || 0,
-          active: dashboardStats.users.active_users || 0,
+          total: parseInt(dashboardStats.users.total_users) || 0,
+          active: parseInt(dashboardStats.users.active_users) || 0,
         },
         elections: {
-          total: dashboardStats.elections.total_elections || 0,
-          active: dashboardStats.elections.active_elections || 0,
-          completed: dashboardStats.elections.completed_elections || 0,
-          draft: dashboardStats.elections.total_elections -
-                 dashboardStats.elections.active_elections -
-                 dashboardStats.elections.completed_elections || 0
+          total: parseInt(dashboardStats.elections.total_elections) || 0,
+          active: parseInt(dashboardStats.elections.active_elections) || 0,
+          completed: parseInt(dashboardStats.elections.completed_elections) || 0,
+          draft: parseInt(dashboardStats.elections.draft_elections) || 0,
+          scheduled: parseInt(dashboardStats.elections.scheduled_elections) || 0
         },
         votes: {
-          totalToday: dashboardStats.votes.total_votes || 0,
-          userVotes: dashboardStats.userVotes.user_votes || 0,
+          totalToday: parseInt(dashboardStats.votes.today_votes) || 0,
+          totalVotes: parseInt(dashboardStats.votes.total_votes) || 0,
+          uniqueVoters: parseInt(dashboardStats.votes.unique_voters) || 0,
+          userVotes: parseInt(dashboardStats.userVotes.user_votes) || 0,
           participationRate: activeElections.length > 0 
-            ? ((dashboardStats.userVotes.user_votes || 0) / activeElections.length * 100)
+            ? ((parseInt(dashboardStats.userVotes.user_votes) || 0) / activeElections.length * 100)
             : 0
         }
       },
@@ -130,6 +150,8 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    console.log('📤 Final dashboard response stats:', dashboardData.stats);
+    
     return NextResponse.json({
       success: true,
       data: dashboardData,

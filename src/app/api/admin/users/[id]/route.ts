@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyJWT } from "@/lib/auth";
-import { getDatabase } from "@/lib/enhanced-database";
+import { getDatabase } from "@/lib/database";
 
 // Helper function to check user role
 async function checkUserRole(userId: string, requiredRole: string): Promise<boolean> {
@@ -138,7 +138,7 @@ export async function PATCH(
     }
 
     // Check if user has admin permissions
-    const hasAdminPermission = await DatabaseUtils.checkUserRole(
+    const hasAdminPermission = await checkUserRole(
       authUser.userId,
       "Admin"
     );
@@ -160,53 +160,57 @@ export async function PATCH(
     const body = await request.json();
     const { status, first_name, last_name } = body;
 
-    const supabase = createAdminClient();
+    const db = await getDatabase();
 
     // Check if user exists
-    const { data: existingUser, error: fetchError } = await supabase
-      .from("users")
-      .select("user_id, email, status")
-      .eq("user_id", userId)
-      .single();
+    const existingUserResult = await db.query(
+      "SELECT user_id, email, status FROM users WHERE user_id = $1",
+      [userId]
+    );
 
-    if (fetchError || !existingUser) {
+    if (existingUserResult.rows.length === 0) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
+    const existingUser = existingUserResult.rows[0];
 
-    // Prepare update data
-    const updateData: any = {};
+    // Build update query dynamically
+    const updateFields = [];
+    const updateValues = [];
+    let paramIndex = 1;
+    
     if (status && ["Active", "Inactive", "Suspended"].includes(status)) {
-      updateData.status = status;
+      updateFields.push(`status = $${paramIndex++}`);
+      updateValues.push(status);
     }
     if (first_name) {
-      updateData.first_name = first_name;
+      updateFields.push(`first_name = $${paramIndex++}`);
+      updateValues.push(first_name);
     }
     if (last_name) {
-      updateData.last_name = last_name;
+      updateFields.push(`last_name = $${paramIndex++}`);
+      updateValues.push(last_name);
     }
-
-    if (Object.keys(updateData).length === 0) {
+    
+    if (updateFields.length === 0) {
       return NextResponse.json(
         { error: "No valid fields to update" },
         { status: 400 }
       );
     }
+    
+    updateValues.push(userId);
+    const updateQuery = `UPDATE users SET ${updateFields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE user_id = $${paramIndex} RETURNING *`;
+    
+    const updateResult = await db.query(updateQuery, updateValues);
 
-    // Update the user
-    const { data: updatedUser, error: updateError } = await supabase
-      .from("users")
-      .update(updateData)
-      .eq("user_id", userId)
-      .select()
-      .single();
-
-    if (updateError) {
-      console.error("Error updating user:", updateError);
+    if (updateResult.rows.length === 0) {
+      console.error("Error updating user");
       return NextResponse.json(
         { error: "Failed to update user" },
         { status: 500 }
       );
     }
+    const updatedUser = updateResult.rows[0];
 
     return NextResponse.json({ 
       message: "User updated successfully",
@@ -235,7 +239,7 @@ export async function GET(
     }
 
     // Check if user has admin permissions
-    const hasAdminPermission = await DatabaseUtils.checkUserRole(
+    const hasAdminPermission = await checkUserRole(
       authUser.userId,
       "Admin"
     );
@@ -254,45 +258,33 @@ export async function GET(
       );
     }
 
-    const supabase = createAdminClient();
+    const db = await getDatabase();
 
     // Get user details
-    const { data: userData, error: userError } = await supabase
-      .from("users")
-      .select(`
-        user_id,
-        email,
-        first_name,
-        last_name,
-        status,
-        last_login,
-        created_at
-      `)
-      .eq("user_id", userId)
-      .single();
+    const userResult = await db.query(
+      `SELECT user_id, email, first_name, last_name, status, last_login, created_at 
+       FROM users WHERE user_id = $1`,
+      [userId]
+    );
 
-    if (userError || !userData) {
+    if (userResult.rows.length === 0) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
+    const userData = userResult.rows[0];
 
     // Get user roles
-    const { data: rolesData, error: rolesError } = await supabase
-      .from("user_roles")
-      .select("role_name")
-      .eq("user_id", userId);
-
-    if (rolesError) {
-      console.error("Error fetching user roles:", rolesError);
-      return NextResponse.json(
-        { error: "Failed to fetch user roles" },
-        { status: 500 }
-      );
-    }
+    const rolesResult = await db.query(
+      `SELECT r.role_name 
+       FROM user_roles ur 
+       JOIN roles r ON ur.role_id = r.role_id 
+       WHERE ur.user_id = $1`,
+      [userId]
+    );
 
     // Combine user data with roles
     const user = {
       ...userData,
-      roles: (rolesData || []).map((role: any) => role.role_name),
+      roles: rolesResult.rows.map((role: any) => role.role_name),
     };
 
     return NextResponse.json({ user });

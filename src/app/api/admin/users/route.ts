@@ -1,45 +1,47 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase";
-import { verifyJWT } from "@/lib/auth";
-import { DatabaseUtils } from "@/lib/database";
+import { supabaseAuth } from "@/lib/supabase-auth";
+import { verify } from "jsonwebtoken";
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify user authentication using local auth
-    const { user: authUser, error: authError } = verifyJWT(request);
-    if (authError || !authUser) {
+    // Check for auth token
+    const authToken = request.cookies.get("auth-token")?.value;
+    if (!authToken) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // Verify JWT token
+    let decoded: any;
+    try {
+      const jwtSecret = process.env.JWT_SECRET;
+      if (!jwtSecret) {
+        return NextResponse.json({ error: "Server configuration error" }, { status: 500 });
+      }
+      
+      decoded = verify(authToken, jwtSecret);
+    } catch (error) {
+      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+    }
+
+    // Get current user with roles to check permissions
+    const currentUser = await supabaseAuth.getUserWithRolesByEmail(decoded.email);
+    if (!currentUser) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
     // Check if user has admin permissions
-    const hasAdminPermission = await DatabaseUtils.checkUserRole(
-      authUser.userId,
-      "Admin"
-    );
-    if (!hasAdminPermission) {
+    if (!currentUser.roles || !currentUser.roles.some((role: string) => ['Admin', 'SuperAdmin'].includes(role))) {
       return NextResponse.json(
         { error: "Admin access required" },
         { status: 403 }
       );
     }
 
-    const supabase = createAdminClient();
-
-    // Get all users first
-    const { data: usersData, error: usersError } = await supabase
-      .from("users")
-      .select(
-        `
-        user_id,
-        email,
-        first_name,
-        last_name,
-        status,
-        last_login,
-        created_at
-      `
-      )
-      .order("created_at", { ascending: false });
+    // Get all users with their roles using Supabase
+    const { data: usersData, error: usersError } = await supabaseAuth.supabaseAdmin
+      .from('users')
+      .select('user_id, email, first_name, last_name, status, last_login, created_at')
+      .order('created_at', { ascending: false });
 
     if (usersError) {
       console.error("Error fetching users:", usersError);
@@ -50,16 +52,12 @@ export async function GET(request: NextRequest) {
     }
 
     // Get all user roles
-    const { data: rolesData, error: rolesError } = await supabase
-      .from("user_roles")
-      .select("user_id, role_name");
+    const { data: rolesData, error: rolesError } = await supabaseAuth.supabaseAdmin
+      .from('user_roles')
+      .select('user_id, role_name');
 
     if (rolesError) {
-      console.error("Error fetching user roles:", rolesError);
-      return NextResponse.json(
-        { error: "Failed to fetch user roles" },
-        { status: 500 }
-      );
+      console.log("User roles table may not exist:", rolesError);
     }
 
     // Create a map of user roles
@@ -95,18 +93,33 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // Verify user authentication using local auth
-    const { user: authUser, error: authError } = verifyJWT(request);
-    if (authError || !authUser) {
+    // Check for auth token
+    const authToken = request.cookies.get("auth-token")?.value;
+    if (!authToken) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // Verify JWT token
+    let decoded: any;
+    try {
+      const jwtSecret = process.env.JWT_SECRET;
+      if (!jwtSecret) {
+        return NextResponse.json({ error: "Server configuration error" }, { status: 500 });
+      }
+      
+      decoded = verify(authToken, jwtSecret);
+    } catch (error) {
+      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+    }
+
+    // Get current user with roles to check permissions
+    const currentUser = await supabaseAuth.getUserWithRolesByEmail(decoded.email);
+    if (!currentUser) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
     // Check if user has admin permissions
-    const hasAdminPermission = await DatabaseUtils.checkUserRole(
-      authUser.userId,
-      "Admin"
-    );
-    if (!hasAdminPermission) {
+    if (!currentUser.roles || !currentUser.roles.some((role: string) => ['Admin', 'SuperAdmin'].includes(role))) {
       return NextResponse.json(
         { error: "Admin access required" },
         { status: 403 }

@@ -11,29 +11,51 @@ import {
 } from "@/components/ui/Card";
 import { Vote, Shield, Users, BarChart3, Check } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 export default function HomePage() {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const [showHomepage, setShowHomepage] = useState(true);
 
   useEffect(() => {
-    if (!loading && user) {
-      router.push("/dashboard");
-    }
-  }, [user, loading, router]);
+    // Show homepage for at least 2 seconds, then allow redirect for authenticated users
+    const timer = setTimeout(() => {
+      if (!loading && user && showHomepage) {
+        // Only redirect if user clicks "Go to Dashboard" or after delay
+        setShowHomepage(false);
+      }
+    }, 2000);
+    
+    return () => clearTimeout(timer);
+  }, [user, loading, showHomepage]);
 
-  if (loading) {
+  const handleGoToDashboard = () => {
+    router.push("/dashboard");
+  };
+
+  // Only show loading for a brief moment to prevent long blank screens
+  // After 1 second, show the homepage regardless to improve UX
+  const [showLoading, setShowLoading] = useState(true);
+  
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowLoading(false);
+    }, 800); // Show loading for max 800ms
+    
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (loading && showLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     );
   }
 
-  if (user) {
-    return null;
-  }
+  // Always show the homepage content - let the useEffect handle redirection
+  // This ensures unauthenticated users see the landing page
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
@@ -47,12 +69,27 @@ export default function HomePage() {
               </span>
             </div>
             <div className="flex items-center space-x-4">
-              <Link href="/login">
-                <Button variant="ghost">Login</Button>
-              </Link>
-              <Link href="/register">
-                <Button variant="primary">Get Started</Button>
-              </Link>
+              {user ? (
+                // Authenticated user options
+                <>
+                  <span className="text-sm text-gray-600">
+                    Welcome, {user.firstName || user.email}
+                  </span>
+                  <Button onClick={handleGoToDashboard} variant="primary">
+                    Go to Dashboard
+                  </Button>
+                </>
+              ) : (
+                // Unauthenticated user options
+                <>
+                  <Link href="/login">
+                    <Button variant="ghost">Login</Button>
+                  </Link>
+                  <Link href="/register">
+                    <Button variant="primary">Get Started</Button>
+                  </Link>
+                </>
+              )}
             </div>
           </div>
         </div>

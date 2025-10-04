@@ -1,33 +1,61 @@
-const { createClient } = require("@supabase/supabase-js");
+const { Client } = require("pg");
 const fs = require("fs");
 const path = require("path");
 
 // Load environment variables
 require("dotenv").config({ path: ".env.local" });
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY;
+const databaseUrl = process.env.DATABASE_URL;
 
-if (!supabaseUrl || !supabaseServiceKey) {
-  console.error("Missing Supabase environment variables");
+if (!databaseUrl) {
+  console.error("Missing DATABASE_URL environment variable");
+  console.error("Please set DATABASE_URL in your .env.local file");
   process.exit(1);
 }
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-  },
+// Create PostgreSQL client
+const client = new Client({
+  connectionString: databaseUrl,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
 async function executeSQLStatement(statement) {
   try {
-    // Use the raw SQL execution
-    const { data, error } = await supabase.rpc("exec_sql", {
-      sql: statement.trim(),
-    });
+    console.log("Executing SQL statement...");
+    const result = await client.query(statement);
+    console.log("✅ SQL statement executed successfully");
+    return result;
+  } catch (error) {
+    console.error("❌ Error executing SQL statement:", error.message);
+    throw error;
+  }
+}
 
-    return { data, error };
+async function connectToDatabase() {
+  try {
+    await client.connect();
+    console.log("✅ Connected to Azure PostgreSQL database");
+  } catch (error) {
+    console.error("❌ Failed to connect to database:", error.message);
+    throw error;
+  }
+}
+
+async function disconnectFromDatabase() {
+  try {
+    await client.end();
+    console.log("✅ Disconnected from database");
+  } catch (error) {
+    console.error("❌ Error disconnecting from database:", error.message);
+  }
+}
+
+async function checkDatabaseConnection() {
+  try {
+    const result = await client.query('SELECT version()');
+    console.log("✅ Database connection successful");
+    console.log("📊 PostgreSQL version:", result.rows[0].version);
+    return { success: true };
   } catch (error) {
     return { data: null, error };
   }
@@ -85,9 +113,15 @@ async function runSQLFile(filePath, description) {
 }
 
 async function setupDatabase() {
-  console.log("🚀 Setting up VoteGuard database...");
+  console.log("🚀 Setting up VoteGuard database with Azure PostgreSQL...");
 
   try {
+    // Connect to database
+    await connectToDatabase();
+
+    // Check connection
+    await checkDatabaseConnection();
+
     // Run schema first
     await runSQLFile(
       path.join(__dirname, "../src/database/schema.sql"),
@@ -104,22 +138,27 @@ async function setupDatabase() {
 
     // Verify setup by checking some tables
     console.log("\n🔍 Verifying setup...");
-    const { data: tables, error } = await supabase
-      .from("information_schema.tables")
-      .select("table_name")
-      .eq("table_schema", "public");
+    const result = await client.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      ORDER BY table_name
+    `);
 
-    if (error) {
-      console.log("❌ Could not verify tables:", error.message);
-    } else {
-      console.log(`✅ Found ${tables.length} tables in database`);
-      console.log("Tables:", tables.map((t) => t.table_name).join(", "));
-    }
+    console.log(`✅ Found ${result.rows.length} tables in database`);
+    console.log("Tables:", result.rows.map((t) => t.table_name).join(", "));
+
   } catch (error) {
     console.error("❌ Database setup failed:", error.message);
     process.exit(1);
+  } finally {
+    // Always disconnect
+    await disconnectFromDatabase();
   }
 }
 
 // Run setup
-setupDatabase();
+setupDatabase().catch(error => {
+  console.error("❌ Unhandled error:", error);
+  process.exit(1);
+});

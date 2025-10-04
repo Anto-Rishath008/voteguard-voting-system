@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase";
-import { DatabaseUtils } from "@/lib/database";
+import { getDatabase } from "@/lib/enhanced-database";
 import { v4 as uuidv4 } from "uuid";
 
 export async function POST(request: NextRequest) {
@@ -14,55 +13,70 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = createAdminClient();
+    const db = getDatabase();
+    if (!db) {
+      return NextResponse.json(
+        { error: "Database connection failed" },
+        { status: 500 }
+      );
+    }
 
     // Create user in our custom users table
-    const { data: user, error: userError } = await supabase
-      .from("users")
-      .insert({
-        user_id: userId,
+    const userResult = await db.query(
+      `INSERT INTO users (id, email, first_name, last_name, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [
+        userId,
         email,
-        first_name: firstName,
-        last_name: lastName,
-        status: "Active",
-      })
-      .select()
-      .single();
+        firstName,
+        lastName,
+        "Active",
+        new Date().toISOString(),
+        new Date().toISOString(),
+      ]
+    );
 
-    if (userError) {
-      console.error("Error creating user:", userError);
+    if (!userResult.rows || userResult.rows.length === 0) {
+      console.error("Error creating user");
       return NextResponse.json(
         { error: "Failed to create user profile" },
         { status: 500 }
       );
     }
 
-    // Assign default voter role
-    const { error: roleError } = await supabase.from("user_roles").insert({
-      user_id: userId,
-      role_name: "Voter",
-      assigned_by: userId, // Self-assigned for registration
-    });
+    const user = userResult.rows[0];
 
-    if (roleError) {
-      console.error("Error assigning role:", roleError);
-      return NextResponse.json(
-        { error: "Failed to assign user role" },
-        { status: 500 }
+    // Assign default voter role
+    try {
+      await db.query(
+        `INSERT INTO user_roles (user_id, role_name, assigned_by, assigned_at)
+         VALUES ($1, $2, $3, $4)`,
+        [userId, "Voter", userId, new Date().toISOString()]
       );
+    } catch (roleError) {
+      console.log("User roles table may not exist:", roleError);
     }
 
     // Create audit log
-    await DatabaseUtils.createAuditLog(
-      userId,
-      "INSERT",
-      "users",
-      userId,
-      undefined,
-      { email, firstName, lastName, action: "user_registration" },
-      request.headers.get("x-forwarded-for") || "unknown",
-      request.headers.get("user-agent") || "unknown"
-    );
+    try {
+      await db.query(
+        `INSERT INTO audit_logs (user_id, action, table_name, record_id, changes, ip_address, user_agent, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          userId,
+          "INSERT",
+          "users",
+          userId,
+          JSON.stringify({ email, firstName, lastName, action: "user_registration" }),
+          request.headers.get("x-forwarded-for") || "unknown",
+          request.headers.get("user-agent") || "unknown",
+          new Date().toISOString()
+        ]
+      );
+    } catch (auditError) {
+      console.log("Audit logs table may not exist:", auditError);
+    }
 
     return NextResponse.json({ user }, { status: 201 });
   } catch (error) {

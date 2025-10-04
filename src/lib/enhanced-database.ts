@@ -127,12 +127,12 @@ export class EnhancedDatabase {
     }
 
     /**
-     * Get user by email
+     * Get user by email (updated for Azure Database schema)
      */
     async getUserByEmail(email: string): Promise<any> {
         const result = await this.query(
-            'SELECT * FROM users WHERE email = $1 AND is_active = $2',
-            [email.toLowerCase(), true]
+            'SELECT * FROM users WHERE email = $1 AND (status IS NULL OR status != $2)',
+            [email.toLowerCase(), 'disabled']
         );
         return result.rows[0] || null;
     }
@@ -149,24 +149,47 @@ export class EnhancedDatabase {
     }
 
     /**
+     * Get user roles by user ID
+     */
+    async getUserRoles(userId: string): Promise<string[]> {
+        const result = await this.query(
+            'SELECT role_name FROM user_roles WHERE user_id = $1',
+            [userId]
+        );
+        return result.rows.map(row => row.role_name);
+    }
+
+    /**
+     * Get user with roles by email
+     */
+    async getUserWithRolesByEmail(email: string): Promise<any> {
+        const user = await this.getUserByEmail(email);
+        if (!user) return null;
+        
+        const roles = await this.getUserRoles(user.user_id);
+        return {
+            ...user,
+            roles
+        };
+    }
+
+    /**
      * Get active elections
      */
     async getActiveElections(): Promise<any[]> {
         const result = await this.query(`
             SELECT 
                 e.*,
-                o.org_name,
+                'VoteGuard System' as org_name,
                 COUNT(DISTINCT c.contest_id) as contest_count,
                 COUNT(DISTINCT candidates.candidate_id) as candidate_count,
-                COUNT(DISTINCT ve.user_id) as voter_count
+                0 as voter_count
             FROM elections e
-            LEFT JOIN organizations o ON e.org_id = o.org_id
             LEFT JOIN contests c ON e.election_id = c.election_id
             LEFT JOIN candidates ON c.contest_id = candidates.contest_id
-            LEFT JOIN voter_eligibility ve ON e.election_id = ve.election_id
-            WHERE e.status = 'active'
-            GROUP BY e.election_id, o.org_name
-            ORDER BY e.voting_start DESC
+            WHERE e.status = 'Active'
+            GROUP BY e.election_id
+            ORDER BY e.start_date DESC
         `);
         return result.rows;
     }
@@ -180,11 +203,11 @@ export class EnhancedDatabase {
                 v.*,
                 e.election_name,
                 e.description as election_description,
-                c.contest_name
+                c.contest_title
             FROM votes v
             JOIN contests c ON v.contest_id = c.contest_id
             JOIN elections e ON c.election_id = e.election_id
-            WHERE v.user_id = $1
+            WHERE v.voter_id = $1
             ORDER BY v.vote_timestamp DESC
         `, [userId]);
         return result.rows;
@@ -199,31 +222,35 @@ export class EnhancedDatabase {
             const userStats = await this.query(`
                 SELECT 
                     COUNT(*) as total_users,
-                    COUNT(CASE WHEN is_active = true THEN 1 END) as active_users
+                    COUNT(CASE WHEN (status IS NULL OR status != 'disabled') THEN 1 END) as active_users
                 FROM users
             `);
 
-            // Get election counts
+            // Get election counts with more detailed status breakdown
             const electionStats = await this.query(`
                 SELECT 
                     COUNT(*) as total_elections,
-                    COUNT(CASE WHEN status = 'active' THEN 1 END) as active_elections,
-                    COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_elections
+                    COUNT(CASE WHEN status = 'Active' THEN 1 END) as active_elections,
+                    COUNT(CASE WHEN status = 'Completed' THEN 1 END) as completed_elections,
+                    COUNT(CASE WHEN status = 'Draft' THEN 1 END) as draft_elections,
+                    COUNT(CASE WHEN status = 'Scheduled' THEN 1 END) as scheduled_elections
                 FROM elections
             `);
 
-            // Get vote counts
+            // Get vote counts - total votes overall, not just today
             const voteStats = await this.query(`
-                SELECT COUNT(*) as total_votes
+                SELECT 
+                    COUNT(*) as total_votes,
+                    COUNT(DISTINCT voter_id) as unique_voters,
+                    COUNT(CASE WHEN DATE(vote_timestamp) = CURRENT_DATE THEN 1 END) as today_votes
                 FROM votes
-                WHERE DATE(vote_timestamp) = CURRENT_DATE
             `);
 
             // Get user-specific vote count
             const userVotes = await this.query(`
                 SELECT COUNT(*) as user_votes
                 FROM votes
-                WHERE user_id = $1
+                WHERE voter_id = $1
             `, [userId]);
 
             return {
@@ -278,13 +305,31 @@ export class EnhancedDatabase {
      */
     async logSecurityEvent(event: any): Promise<void> {
         try {
+            // Map custom events to valid operation_type values
+            let operationType = 'LOGIN'; // Default to LOGIN for most security events
+            
+            if (event.action === 'LOGIN_SUCCESS') {
+                operationType = 'LOGIN';
+            } else if (event.action === 'LOGIN_FAILED') {
+                operationType = 'LOGIN'; // Use LOGIN for failed attempts too
+            } else if (event.action === 'LOGOUT') {
+                operationType = 'LOGOUT';
+            } else if (event.action?.includes('INSERT')) {
+                operationType = 'INSERT';
+            } else if (event.action?.includes('UPDATE')) {
+                operationType = 'UPDATE';
+            } else if (event.action?.includes('DELETE')) {
+                operationType = 'DELETE';
+            }
+            
             await this.query(`
-                INSERT INTO audit_logs (user_id, action, details, ip_address, user_agent)
-                VALUES ($1, $2, $3, $4, $5)
+                INSERT INTO audit_log (user_id, operation_type, table_name, new_values, ip_address, user_agent, timestamp)
+                VALUES ($1, $2, $3, $4, $5, $6, NOW())
             `, [
                 event.user_id || null,
-                event.action || 'SECURITY_EVENT',
-                JSON.stringify(event.details || {}),
+                operationType,
+                'users',
+                JSON.stringify({ action: event.action, ...(event.details || {}) }),
                 event.ip_address || 'unknown',
                 event.user_agent || 'unknown'
             ]);

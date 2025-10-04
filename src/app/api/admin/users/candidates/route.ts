@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase";
+import { getDatabase } from "@/lib/database";
 import { verifyJWT } from "@/lib/auth";
-import { DatabaseUtils } from "@/lib/database";
 
 // GET users that can be added as candidates
 export async function GET(request: NextRequest) {
@@ -13,40 +12,37 @@ export async function GET(request: NextRequest) {
     }
 
     // Check if user has admin permissions
-    const hasAdminPermission = await DatabaseUtils.checkUserRole(
-      authUser.userId,
-      "Admin"
+    const db = await getDatabase();
+    const roleResult = await db.query(
+      "SELECT role_name FROM user_roles WHERE user_id = $1 AND role_name IN ('Admin', 'SuperAdmin')",
+      [authUser.userId]
     );
-    if (!hasAdminPermission) {
+    
+    if (roleResult.rows.length === 0) {
       return NextResponse.json(
         { error: "Admin access required" },
         { status: 403 }
       );
     }
 
-    const supabase = createAdminClient();
-
     // Get all active users
-    const { data: users, error: usersError } = await supabase
-      .from("users")
-      .select("user_id, first_name, last_name, email")
-      .eq("status", "Active")
-      .order("first_name");
+    const usersResult = await db.query(
+      "SELECT user_id, first_name, last_name, email FROM users WHERE status = 'Active' ORDER BY first_name"
+    );
 
-    if (usersError) {
-      console.error("Error fetching users:", usersError);
+    if (!usersResult.rows) {
+      console.error("Error fetching users");
       return NextResponse.json(
         { error: "Failed to fetch users" },
         { status: 500 }
       );
     }
 
-    const formattedUsers =
-      users?.map((user) => ({
-        id: user.user_id,
-        name: `${user.first_name} ${user.last_name}`,
-        email: user.email,
-      })) || [];
+    const formattedUsers = usersResult.rows.map((user: any) => ({
+      id: user.user_id,
+      name: `${user.first_name} ${user.last_name}`,
+      email: user.email,
+    }));
 
     return NextResponse.json({ users: formattedUsers });
   } catch (error) {

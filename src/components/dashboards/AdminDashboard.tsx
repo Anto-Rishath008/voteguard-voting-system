@@ -37,7 +37,7 @@ interface RecentActivity {
 }
 
 export default function AdminDashboard() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, loading: authLoading } = useAuth();
   const [stats, setStats] = useState<AdminStats>({
     totalElections: 0,
     activeElections: 0,
@@ -51,8 +51,19 @@ export default function AdminDashboard() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetchAdminDashboardData();
-  }, []);
+    // Wait for auth to finish loading
+    if (authLoading) {
+      return;
+    }
+    
+    // Only fetch data if user is authenticated
+    if (user) {
+      fetchAdminDashboardData();
+    } else {
+      setLoading(false);
+      setError("Please log in to view dashboard");
+    }
+  }, [user, authLoading]);
 
   const fetchAdminDashboardData = async () => {
     try {
@@ -121,12 +132,25 @@ export default function AdminDashboard() {
     return "Just now";
   };
 
-  if (loading) {
+  // Show loading if auth is loading or component is loading
+  if (authLoading || loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <Settings className="h-12 w-12 text-blue-600 mx-auto animate-pulse" />
           <p className="mt-4 text-gray-600">Loading admin dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error or login message if not authenticated
+  if (!user || error.includes("Please log in")) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <Settings className="h-12 w-12 text-gray-600 mx-auto" />
+          <p className="mt-4 text-gray-600">Please log in to view your dashboard</p>
         </div>
       </div>
     );
@@ -168,7 +192,7 @@ export default function AdminDashboard() {
         )}
 
         {/* System Alerts */}
-        {stats.systemAlerts > 0 && (
+        {(stats?.systemAlerts || 0) > 0 && (
           <div className="mb-8">
             <div className="bg-gradient-to-r from-red-600 to-orange-600 rounded-lg p-6 text-white">
               <div className="flex items-center justify-between">
@@ -178,7 +202,7 @@ export default function AdminDashboard() {
                     System Alerts
                   </h2>
                   <p className="mt-1">
-                    {stats.systemAlerts} issue{stats.systemAlerts > 1 ? 's' : ''} require{stats.systemAlerts === 1 ? 's' : ''} your attention
+                    {stats?.systemAlerts || 0} issue{(stats?.systemAlerts || 0) > 1 ? 's' : ''} require{(stats?.systemAlerts || 0) === 1 ? 's' : ''} your attention
                   </p>
                 </div>
                 <Button
@@ -204,7 +228,7 @@ export default function AdminDashboard() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">Elections</p>
                   <p className="text-2xl font-semibold text-gray-900">
-                    {stats.totalElections}
+                    {stats?.totalElections || 0}
                   </p>
                 </div>
               </div>
@@ -220,7 +244,7 @@ export default function AdminDashboard() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">Active</p>
                   <p className="text-2xl font-semibold text-gray-900">
-                    {stats.activeElections}
+                    {stats?.activeElections || 0}
                   </p>
                 </div>
               </div>
@@ -236,7 +260,7 @@ export default function AdminDashboard() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">Voters</p>
                   <p className="text-2xl font-semibold text-gray-900">
-                    {stats.totalVoters}
+                    {stats?.totalVoters || 0}
                   </p>
                 </div>
               </div>
@@ -252,7 +276,7 @@ export default function AdminDashboard() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">Total Votes</p>
                   <p className="text-2xl font-semibold text-gray-900">
-                    {stats.totalVotes}
+                    {stats?.totalVotes || 0}
                   </p>
                 </div>
               </div>
@@ -268,7 +292,7 @@ export default function AdminDashboard() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">Pending</p>
                   <p className="text-2xl font-semibold text-gray-900">
-                    {stats.pendingApprovals}
+                    {stats?.pendingApprovals || 0}
                   </p>
                 </div>
               </div>
@@ -284,7 +308,7 @@ export default function AdminDashboard() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">Alerts</p>
                   <p className="text-2xl font-semibold text-gray-900">
-                    {stats.systemAlerts}
+                    {stats?.systemAlerts || 0}
                   </p>
                 </div>
               </div>

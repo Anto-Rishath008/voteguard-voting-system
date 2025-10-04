@@ -1,4 +1,4 @@
-const { createClient } = require("@supabase/supabase-js");
+const { Client } = require("pg");
 const fs = require("fs");
 const path = require("path");
 
@@ -14,40 +14,30 @@ envContent.split("\n").forEach((line) => {
   }
 });
 
-const supabaseUrl = envVars.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = envVars.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY;
+const databaseUrl = envVars.DATABASE_URL;
 
-if (!supabaseUrl || !supabaseServiceKey) {
-  console.error("Missing Supabase environment variables");
-  console.error("URL:", supabaseUrl);
-  console.error("Key:", supabaseServiceKey ? "Present" : "Missing");
+if (!databaseUrl) {
+  console.error("Missing DATABASE_URL environment variable");
   process.exit(1);
 }
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-  },
+const client = new Client({
+  connectionString: databaseUrl,
 });
 
 async function testConnection() {
-  console.log("🔄 Testing Supabase connection...");
+  console.log("🔄 Testing Azure PostgreSQL connection...");
 
   try {
+    await client.connect();
+    
     // Test basic connection
-    const { data, error } = await supabase
-      .from("pg_tables")
-      .select("tablename")
-      .limit(1);
+    const result = await client.query(
+      "SELECT tablename FROM pg_tables LIMIT 1"
+    );
 
-    if (error) {
-      console.error("❌ Connection test failed:", error.message);
-      return false;
-    } else {
-      console.log("✅ Connection successful!");
-      return true;
-    }
+    console.log("✅ Connection successful!");
+    return true;
   } catch (error) {
     console.error("❌ Connection error:", error.message);
     return false;
@@ -105,15 +95,9 @@ async function createTablesDirectly() {
       console.log(
         `   [${index + 1}/${createTableQueries.length}] Creating table...`
       );
-      const { error } = await supabase.rpc("exec", { sql: query });
-
-      if (error) {
-        console.log(`   ❌ Error: ${error.message}`);
-        errorCount++;
-      } else {
-        console.log(`   ✅ Success`);
-        successCount++;
-      }
+      await client.query(query);
+      console.log(`   ✅ Success`);
+      successCount++;
     } catch (error) {
       console.log(`   ❌ Exception: ${error.message}`);
       errorCount++;
@@ -143,13 +127,11 @@ async function setupDatabase() {
   await createTablesDirectly();
 
   console.log(
-    "\n📝 Note: For full schema setup, you may need to run the SQL files manually in Supabase dashboard"
+    "\n📝 Note: For full schema setup, you may need to run the SQL files manually in Azure Database"
   );
-  console.log(
-    `   Dashboard: ${supabaseUrl.replace("/rest/v1", "")}/project/${
-      supabaseUrl.split(".")[0].split("//")[1]
-    }/sql`
-  );
+  
+  await client.end();
+  console.log("✅ Database connection closed");
 }
 
 setupDatabase().catch((error) => {

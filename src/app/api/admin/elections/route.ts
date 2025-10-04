@@ -1,48 +1,49 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase";
-import { verifyJWT } from "@/lib/auth";
-import { DatabaseUtils } from "@/lib/database";
+import { supabaseAuth } from "@/lib/supabase-auth";
+import { verify } from "jsonwebtoken";
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify user authentication using local auth
-    const { user: authUser, error: authError } = verifyJWT(request);
-    if (authError || !authUser) {
+    // Check for auth token
+    const authToken = request.cookies.get("auth-token")?.value;
+    if (!authToken) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // Verify JWT token
+    let decoded: any;
+    try {
+      const jwtSecret = process.env.JWT_SECRET;
+      if (!jwtSecret) {
+        return NextResponse.json({ error: "Server configuration error" }, { status: 500 });
+      }
+      
+      decoded = verify(authToken, jwtSecret);
+    } catch (error) {
+      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+    }
+
+    // Get current user with roles to check permissions
+    const currentUser = await supabaseAuth.getUserWithRolesByEmail(decoded.email);
+    if (!currentUser) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
     // Check if user has admin permissions
-    const hasAdminPermission = await DatabaseUtils.checkUserRole(
-      authUser.userId,
-      "Admin"
-    );
-    if (!hasAdminPermission) {
+    if (!currentUser.roles || !currentUser.roles.some((role: string) => ['Admin', 'SuperAdmin'].includes(role))) {
       return NextResponse.json(
         { error: "Admin access required" },
         { status: 403 }
       );
     }
 
-    const supabase = createAdminClient();
-
-    // Get all elections (admin can see all elections)
-    const { data: electionsData, error: electionsError } = await supabase
-      .from("elections")
-      .select(
-        `
-        election_id,
-        election_name,
-        description,
-        status,
-        start_date,
-        end_date,
-        creator,
-        created_at
-      `
-      )
-      .order("created_at", { ascending: false });
-
-    if (electionsError) {
+    // Get all elections using Supabase
+    const { data: electionsData, error: electionsError } = await supabaseAuth.supabaseAdmin
+      .from('elections')
+      .select('election_id, election_name, description, status, start_date, end_date, creator, created_at')
+      .order('created_at', { ascending: false });
+    
+    if (electionsError || !electionsData) {
       console.error("Error fetching elections:", electionsError);
       return NextResponse.json(
         { error: "Failed to fetch elections" },
@@ -50,20 +51,23 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get vote counts for each election (simplified without eligibility table)
+    // Get vote counts for each election
     const elections = await Promise.all(
       (electionsData || []).map(async (election: any) => {
-        // Get vote count
-        const { count: totalVotes } = await supabase
-          .from("votes")
-          .select("*", { count: "exact", head: true })
-          .eq("election_id", election.election_id);
+        // Get vote count using Supabase
+        const { count: voteCount } = await supabaseAuth.supabaseAdmin
+          .from('votes')
+          .select('*', { count: 'exact', head: true })
+          .eq('election_id', election.election_id);
+        const totalVotes = voteCount || 0;
 
         // Get total eligible voters (users with Voter role)
-        const { count: totalVoters } = await supabase
-          .from("user_roles")
-          .select("*", { count: "exact", head: true })
-          .eq("role_name", "Voter");
+        const { count: voterCount } = await supabaseAuth.supabaseAdmin
+          .from('user_roles')
+          .select('*', { count: 'exact', head: true })
+          .eq('role_name', 'Voter');
+        
+        const totalVoters = voterCount || 0;
 
         // Map database status to frontend status
         let mappedStatus = election.status.toLowerCase();
@@ -100,7 +104,14 @@ export async function GET(request: NextRequest) {
       })
     );
 
-    return NextResponse.json({ elections });
+    const response = NextResponse.json({ elections });
+
+    // Prevent caching to ensure users always get fresh election data
+    response.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    response.headers.set('Pragma', 'no-cache');
+    response.headers.set('Expires', '0');
+
+    return response;
   } catch (error) {
     console.error("Admin elections API error:", error);
     return NextResponse.json(
@@ -112,27 +123,40 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // Verify user authentication using local auth
-    const { user: authUser, error: authError } = verifyJWT(request);
-    if (authError || !authUser) {
+    // Check for auth token
+    const authToken = request.cookies.get("auth-token")?.value;
+    if (!authToken) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // Verify JWT token
+    let decoded: any;
+    try {
+      const jwtSecret = process.env.JWT_SECRET;
+      if (!jwtSecret) {
+        return NextResponse.json({ error: "Server configuration error" }, { status: 500 });
+      }
+      
+      decoded = verify(authToken, jwtSecret);
+    } catch (error) {
+      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+    }
+
+    // Get current user with roles to check permissions
+    const currentUser = await supabaseAuth.getUserWithRolesByEmail(decoded.email);
+    if (!currentUser) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
     // Check if user has admin permissions
-    const hasAdminPermission = await DatabaseUtils.checkUserRole(
-      authUser.userId,
-      "Admin"
-    );
-    if (!hasAdminPermission) {
+    if (!currentUser.roles || !currentUser.roles.some((role: string) => ['Admin', 'SuperAdmin'].includes(role))) {
       return NextResponse.json(
         { error: "Admin access required" },
         { status: 403 }
       );
     }
 
-    const supabase = createAdminClient();
     const body = await request.json();
-
     const { title, description, startDate, endDate } = body;
 
     if (!title || !startDate || !endDate) {
@@ -142,21 +166,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create new election
-    const { data: election, error: electionError } = await supabase
-      .from("elections")
-      .insert({
+    // Create new election using Supabase
+    const { data: election, error: electionError } = await supabaseAuth.supabaseAdmin
+      .from('elections')
+      .insert([{
         election_name: title,
         description: description || "",
         start_date: startDate,
         end_date: endDate,
         status: "Draft",
-        creator: authUser.userId,
-      })
-      .select()
+        creator: decoded.userId
+      }])
+      .select('election_id, election_name, description, start_date, end_date, status, creator, created_at')
       .single();
 
-    if (electionError) {
+    if (electionError || !election) {
       console.error("Error creating election:", electionError);
       return NextResponse.json(
         { error: "Failed to create election" },

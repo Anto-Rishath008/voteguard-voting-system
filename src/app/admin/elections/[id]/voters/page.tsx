@@ -159,6 +159,60 @@ export default function AdminElectionVotersPage() {
     }
   };
 
+  const handleImportVoters = () => {
+    // Create a file input element
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".csv,.xlsx,.xls";
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file) {
+        console.log("Importing voters from file:", file.name);
+        // TODO: Implement file upload and processing
+        setError("Import functionality coming soon!");
+        setTimeout(() => setError(""), 3000);
+      }
+    };
+    input.click();
+  };
+
+  const handleExportList = () => {
+    try {
+      // Create CSV content
+      const headers = ["First Name", "Last Name", "Email", "Status", "Eligibility", "Has Voted"];
+      const csvContent = [
+        headers.join(","),
+        ...filteredVoters.map(voter => [
+          voter.firstName,
+          voter.lastName,
+          voter.email,
+          voter.status,
+          voter.eligibilityStatus,
+          voter.hasVoted ? "Yes" : "No"
+        ].join(","))
+      ].join("\n");
+
+      // Create and download file
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      link.setAttribute("download", `${election?.title || 'election'}_voters.csv`);
+      link.style.visibility = "hidden";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      setError("Failed to export voter list");
+      setTimeout(() => setError(""), 3000);
+    }
+  };
+
+  const handleAddVoter = () => {
+    // Navigate to add voter page or open modal
+    router.push(`/admin/elections/${electionId}/voters/add`);
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "Active":
@@ -212,15 +266,15 @@ export default function AdminElectionVotersPage() {
               )}
             </div>
             <div className="flex gap-3">
-              <Button variant="outline">
+              <Button variant="outline" onClick={handleImportVoters}>
                 <Upload className="h-4 w-4 mr-2" />
                 Import Voters
               </Button>
-              <Button variant="outline">
+              <Button variant="outline" onClick={handleExportList}>
                 <Download className="h-4 w-4 mr-2" />
                 Export List
               </Button>
-              <Button>
+              <Button onClick={handleAddVoter}>
                 <Plus className="h-4 w-4 mr-2" />
                 Add Voter
               </Button>

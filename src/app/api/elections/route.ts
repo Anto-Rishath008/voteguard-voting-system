@@ -30,7 +30,8 @@ export async function GET(request: NextRequest) {
         e.creator,
         e.created_at,
         e.updated_at,
-        COUNT(c.contest_id) as contest_count
+        COUNT(c.contest_id) as contest_count,
+        0 as total_voters
       FROM elections e
       LEFT JOIN contests c ON e.election_id = c.election_id
     `;
@@ -75,8 +76,22 @@ export async function GET(request: NextRequest) {
 
     console.log(`Found ${result.rows.length} elections, total: ${total}`);
 
-    return NextResponse.json({
-      elections: result.rows,
+    // Transform data to match frontend interface
+    const transformedElections = result.rows.map((row: any) => ({
+      id: row.election_id,
+      title: row.election_name,
+      description: row.description,
+      status: row.status,
+      startDate: row.start_date,
+      endDate: row.end_date,
+      totalVoters: row.total_voters || 0,
+      myVoteStatus: "not_voted", // Default value - could be calculated based on user
+      organizationName: row.organization_name || "",
+      contestCount: row.contest_count || 0
+    }));
+
+    const response = NextResponse.json({
+      elections: transformedElections,
       pagination: {
         page,
         limit,
@@ -84,6 +99,13 @@ export async function GET(request: NextRequest) {
         totalPages: Math.ceil(total / limit)
       }
     });
+
+    // Prevent caching to ensure users always get fresh election data
+    response.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    response.headers.set('Pragma', 'no-cache');
+    response.headers.set('Expires', '0');
+
+    return response;
 
   } catch (error) {
     console.error("Elections API error:", error);

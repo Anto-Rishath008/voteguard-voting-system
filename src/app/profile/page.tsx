@@ -31,6 +31,9 @@ export default function ProfilePage() {
       router.push("/login");
     }
     if (user) {
+      console.log("Profile page: User data received:", user);
+      console.log("Profile page: firstName:", user.firstName);
+      console.log("Profile page: lastName:", user.lastName);
       setFormData({
         firstName: user.firstName || "",
         lastName: user.lastName || "",
@@ -243,7 +246,7 @@ export default function ProfilePage() {
                   <div>
                     <p className="text-sm font-medium text-gray-900">User ID</p>
                     <p className="text-sm text-gray-600 font-mono">
-                      {user.id}
+                      {user.userId}
                     </p>
                   </div>
                 </div>

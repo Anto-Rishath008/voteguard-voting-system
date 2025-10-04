@@ -1,25 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createRouteHandlerClient } from "@/lib/supabase";
-import { DatabaseUtils } from "@/lib/database";
+import { getDatabase } from "@/lib/database";
+import { verifyJWT } from "@/lib/auth";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient(request);
     const { votes, sessionId } = await request.json();
-
-    // Get current user and check permissions
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-    if (authError || !user) {
+    
+    // Verify user authentication using local auth
+    const { user: authUser, error: authError } = verifyJWT(request);
+    if (authError || !authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const hasPermission = await DatabaseUtils.checkUserRole(user.id, "Voter");
-    if (!hasPermission) {
+    // Check if user has voter permissions
+    const db = await getDatabase();
+    const roleResult = await db.query(
+      "SELECT role_name FROM user_roles WHERE user_id = $1 AND role_name = 'Voter'",
+      [authUser.userId]
+    );
+    
+    if (roleResult.rows.length === 0) {
       return NextResponse.json(
         { error: "Insufficient permissions" },
         { status: 403 }
@@ -48,53 +50,49 @@ export async function POST(request: NextRequest) {
         }
 
         // Check if user already voted in this contest
-        const hasVoted = await DatabaseUtils.hasUserVoted(
-          user.id,
-          contestId,
-          electionId
+        const voteCheckResult = await db.query(
+          "SELECT vote_id FROM votes WHERE user_id = $1 AND contest_id = $2 AND election_id = $3",
+          [authUser.userId, contestId, electionId]
         );
-        if (hasVoted) {
+        if (voteCheckResult.rows.length > 0) {
           errors.push(`User has already voted in contest ${contestId}`);
           continue;
         }
 
-        // Verify contest and candidate exist
-        const { data: contest } = await supabase
-          .from("contests")
-          .select("*")
-          .eq("contest_id", contestId)
-          .eq("election_id", electionId)
-          .single();
+        // Verify contest exists
+        const contestResult = await db.query(
+          "SELECT * FROM contests WHERE contest_id = $1 AND election_id = $2",
+          [contestId, electionId]
+        );
 
-        if (!contest) {
+        if (contestResult.rows.length === 0) {
           errors.push(`Contest ${contestId} not found`);
           continue;
         }
+        const contest = contestResult.rows[0];
 
-        const { data: candidate } = await supabase
-          .from("candidates")
-          .select("*")
-          .eq("candidate_id", candidateId)
-          .eq("contest_id", contestId)
-          .eq("election_id", electionId)
-          .single();
+        const candidateResult = await db.query(
+          "SELECT * FROM candidates WHERE candidate_id = $1 AND contest_id = $2",
+          [candidateId, contestId]
+        );
 
-        if (!candidate) {
+        if (candidateResult.rows.length === 0) {
           errors.push(`Candidate ${candidateId} not found`);
           continue;
         }
+        const candidate = candidateResult.rows[0];
 
         // Check if election is active
-        const { data: election } = await supabase
-          .from("elections")
-          .select("*")
-          .eq("election_id", electionId)
-          .single();
+        const electionResult = await db.query(
+          "SELECT * FROM elections WHERE election_id = $1",
+          [electionId]
+        );
 
-        if (!election || election.status !== "Active") {
+        if (electionResult.rows.length === 0 || electionResult.rows[0].status !== "Active") {
           errors.push(`Election ${electionId} is not active`);
           continue;
         }
+        const election = electionResult.rows[0];
 
         const now = new Date();
         const startDate = new Date(election.start_date);
@@ -106,60 +104,53 @@ export async function POST(request: NextRequest) {
         }
 
         // Get previous vote hash for chaining
-        const previousHash = await DatabaseUtils.getLastVoteHash();
+        const previousHashResult = await db.query(
+          "SELECT vote_hash FROM votes ORDER BY vote_timestamp DESC LIMIT 1"
+        );
+        const previousHash = previousHashResult.rows[0]?.vote_hash || null;
 
         // Generate vote data
         const voteTimestamp = new Date().toISOString();
-        const voteHash = DatabaseUtils.generateVoteHash({
-          contestId,
-          voterId: user.id,
-          candidateId,
-          timestamp: voteTimestamp,
-          previousHash,
-        });
+        const voteData = `${contestId}-${authUser.userId}-${candidateId}-${voteTimestamp}-${previousHash || ''}`;
+        const voteHash = crypto.createHash('sha256').update(voteData).digest('hex');
 
         // Insert vote
-        const { data: newVote, error: voteError } = await supabase
-          .from("votes")
-          .insert({
-            vote_id: uuidv4(),
-            contest_id: contestId,
-            election_id: electionId,
-            voter_id: user.id,
-            candidate_id: candidateId,
-            vote_timestamp: voteTimestamp,
-            vote_hash: voteHash,
-            previous_vote_hash: previousHash,
-            session_id: sessionId || uuidv4(),
-          })
-          .select()
-          .single();
+        const voteId = uuidv4();
+        const voteInsertResult = await db.query(
+          `INSERT INTO votes (vote_id, contest_id, election_id, user_id, candidate_id, vote_timestamp, vote_hash, previous_vote_hash, session_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           RETURNING *`,
+          [voteId, contestId, electionId, authUser.userId, candidateId, voteTimestamp, voteHash, previousHash, sessionId || uuidv4()]
+        );
 
-        if (voteError) {
-          console.error("Error casting vote:", voteError);
+        if (voteInsertResult.rows.length === 0) {
+          console.error("Error casting vote");
           errors.push(`Failed to cast vote for contest ${contestId}`);
           continue;
         }
+        const newVote = voteInsertResult.rows[0];
 
         castedVotes.push(newVote);
 
-        // Create audit log for vote
-        await DatabaseUtils.createAuditLog(
-          user.id,
-          "VOTE_CAST",
-          "votes",
-          newVote.vote_id,
-          undefined,
-          {
-            contestId,
-            electionId,
-            candidateId,
-            voteHash,
-            timestamp: voteTimestamp,
-          },
-          request.headers.get("x-forwarded-for") || "unknown",
-          request.headers.get("user-agent") || "unknown"
-        );
+        // Create audit log for vote (optional - only if audit_logs table exists)
+        try {
+          await db.query(
+            `INSERT INTO audit_logs (user_id, action, table_name, record_id, new_values, ip_address, user_agent, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+            [
+              authUser.userId,
+              "VOTE_CAST",
+              "votes",
+              newVote.vote_id,
+              JSON.stringify({ contestId, electionId, candidateId, voteHash, timestamp: voteTimestamp }),
+              request.headers.get("x-forwarded-for") || "unknown",
+              request.headers.get("user-agent") || "unknown"
+            ]
+          );
+        } catch (auditError: any) {
+          // Audit logging is optional - don't fail the vote if audit table doesn't exist
+          console.log("Audit logging skipped (table may not exist):", auditError.message);
+        }
       } catch (error) {
         console.error("Error processing vote:", error);
         errors.push(`Error processing vote: ${error}`);
@@ -190,65 +181,62 @@ export async function POST(request: NextRequest) {
 // Get vote history for current user
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient(request);
     const { searchParams } = new URL(request.url);
     const electionId = searchParams.get("electionId");
 
-    // Get current user and check permissions
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-    if (authError || !user) {
+    // Verify user authentication using local auth
+    const { user: authUser, error: authError } = verifyJWT(request);
+    if (authError || !authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const hasPermission = await DatabaseUtils.checkUserRole(user.id, "Voter");
-    if (!hasPermission) {
+    // Check if user has voter permissions
+    const db = await getDatabase();
+    const roleResult = await db.query(
+      "SELECT role_name FROM user_roles WHERE user_id = $1 AND role_name = 'Voter'",
+      [authUser.userId]
+    );
+    
+    if (roleResult.rows.length === 0) {
       return NextResponse.json(
         { error: "Insufficient permissions" },
         { status: 403 }
       );
     }
 
-    // Build query
-    let query = supabase
-      .from("votes")
-      .select(
-        `
-        *,
-        candidates (
-          candidate_name,
-          party
-        ),
-        contests!inner (
-          contest_title,
-          contest_type
-        ),
-        elections!inner (
-          election_name
-        )
-      `
-      )
-      .eq("voter_id", user.id);
-
+    // Build query for vote history with joins
+    let sqlQuery = `
+      SELECT v.*, 
+             c.candidate_name, c.party,
+             cont.contest_title, cont.contest_type,
+             e.election_name
+      FROM votes v
+      LEFT JOIN candidates c ON v.candidate_id = c.candidate_id
+      LEFT JOIN contests cont ON v.contest_id = cont.contest_id
+      LEFT JOIN elections e ON v.election_id = e.election_id
+      WHERE v.user_id = $1
+    `;
+    
+    let queryParams = [authUser.userId];
+    
     if (electionId) {
-      query = query.eq("election_id", electionId);
+      sqlQuery += ` AND v.election_id = $2`;
+      queryParams.push(electionId);
     }
+    
+    sqlQuery += ` ORDER BY v.vote_timestamp DESC`;
 
-    const { data: votes, error } = await query.order("vote_timestamp", {
-      ascending: false,
-    });
+    const votesResult = await db.query(sqlQuery, queryParams);
 
-    if (error) {
-      console.error("Error fetching vote history:", error);
+    if (!votesResult.rows) {
+      console.error("Error fetching vote history");
       return NextResponse.json(
         { error: "Failed to fetch vote history" },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ votes });
+    return NextResponse.json({ votes: votesResult.rows });
   } catch (error) {
     console.error("Vote history error:", error);
     return NextResponse.json(

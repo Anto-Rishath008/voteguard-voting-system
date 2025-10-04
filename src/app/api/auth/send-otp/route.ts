@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase";
+import { getDatabase } from "@/lib/enhanced-database";
 import crypto from "crypto";
 import EmailService from "@/lib/email";
 import SMSService from "@/lib/sms";
@@ -40,27 +40,29 @@ export async function POST(request: NextRequest) {
     // Set expiration (5 minutes from now)
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-    const supabase = createAdminClient();
-    if (!supabase) {
+    const db = getDatabase();
+    if (!db) {
       return NextResponse.json(
         { error: "Database connection failed" },
         { status: 500 }
       );
     }
 
-    // Store OTP in database (you'll need to create this table)
+    // Store OTP in database
     try {
-      await supabase
-        .from("otp_verifications")
-        .insert({
-          email: email.toLowerCase(),
-          otp_hash: hashedOTP,
+      await db.query(
+        `INSERT INTO otp_verifications (email, otp_hash, type, expires_at, attempts, verified, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          email.toLowerCase(),
+          hashedOTP,
           type,
-          expires_at: expiresAt.toISOString(),
-          attempts: 0,
-          verified: false,
-          created_at: new Date().toISOString()
-        });
+          expiresAt.toISOString(),
+          0,
+          false,
+          new Date().toISOString()
+        ]
+      );
     } catch (dbError) {
       console.log("OTP storage failed (table may not exist):", dbError);
       // For now, we'll continue without storing in DB

@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDatabase } from "@/lib/enhanced-database";
+import { supabaseAuth } from "@/lib/supabase-auth";
 import { verify } from "jsonwebtoken";
 
 export async function GET(request: NextRequest) {
   try {
     console.log("Profile API called - checking authentication...");
     
+    // Debug: Log all cookies
+    const allCookies = request.cookies.getAll();
+    console.log("All cookies received:", allCookies.map(c => ({ name: c.name, hasValue: !!c.value })));
+    
     // Check for local auth token
-    const authToken = request.cookies.get("auth_token")?.value;
+    const authToken = request.cookies.get("auth-token")?.value;
     console.log("Auth token present:", !!authToken);
+    if (authToken) {
+      console.log("Auth token length:", authToken.length);
+    }
 
     if (!authToken) {
       return NextResponse.json({ 
@@ -37,60 +44,50 @@ export async function GET(request: NextRequest) {
       }, { status: 401 });
     }
 
-    const db = getDatabase();
+    console.log("Querying user details from Supabase for user_id:", decoded.userId);
     
-    console.log("Querying user details from database for user_id:", decoded.userId);
+    // Get user details from Supabase
+    const { data: userData, error: userError } = await supabaseAuth.supabaseAdmin
+      .from('users')
+      .select('*')
+      .eq('user_id', decoded.userId)
+      .single();
     
-    // Get user details from database
-    const userResult = await db.query(
-      'SELECT * FROM users WHERE user_id = $1',
-      [decoded.userId]
-    );
-    
-    if (userResult.rows.length === 0) {
-      console.error("User not found in database:", decoded.userId);
+    if (userError || !userData) {
+      console.error("User not found in database:", decoded.userId, userError);
       return NextResponse.json({ 
         error: "User not found",
         authRequired: true
       }, { status: 404 });
     }
     
-    const user = userResult.rows[0];
-    console.log("User found:", { userId: user.user_id, email: user.email });
+    console.log("User found:", { userId: userData.user_id, email: userData.email });
 
     // Get user roles
-    const rolesResult = await db.query(`
-      SELECT r.role_name 
-      FROM user_roles ur 
-      JOIN roles r ON ur.role_id = r.role_id 
-      WHERE ur.user_id = $1
-    `, [user.user_id]);
-    
-    const userRoles = rolesResult.rows.map((r: any) => r.role_name) || [];
-    console.log("User roles:", userRoles);
+    const { data: rolesData, error: rolesError } = await supabaseAuth.supabaseAdmin
+      .from('user_roles')
+      .select('role_name')
+      .eq('user_id', userData.user_id);
 
-    // Create audit log
-    await db.query(`
-      INSERT INTO audit_log (user_id, operation, resource_type, resource_id, details, timestamp)
-      VALUES ($1, $2, $3, $4, $5, NOW())
-    `, [
-      user.user_id,
-      'VIEW',
-      'profile',
-      user.user_id,
-      'User accessed their profile information'
-    ]);
+    if (rolesError) {
+      console.error("Error fetching user roles:", rolesError);
+      return NextResponse.json({ error: "Error fetching user roles" }, { status: 500 });
+    }
+
+    const userRoles = rolesData?.map(r => r.role_name) || [];
+    console.log("User roles:", userRoles);
 
     return NextResponse.json({
       user: {
-        id: user.user_id,
-        email: user.email,
-        firstName: user.first_name,
-        lastName: user.last_name,
-        phoneNumber: user.phone_number,
+        userId: userData.user_id,
+        email: userData.email,
+        firstName: userData.first_name,
+        lastName: userData.last_name,
+        phoneNumber: userData.phone_number,
         roles: userRoles,
-        createdAt: user.created_at,
-        lastLogin: user.last_login
+        status: userData.status,
+        createdAt: userData.created_at,
+        lastLogin: userData.last_login
       }
     });
 
@@ -109,7 +106,7 @@ export async function GET(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     // Check for auth token
-    const authToken = request.cookies.get("auth_token")?.value;
+    const authToken = request.cookies.get("auth-token")?.value;
     if (!authToken) {
       return NextResponse.json({ 
         error: "No authentication token found",
@@ -136,41 +133,46 @@ export async function PUT(request: NextRequest) {
     const body = await request.json();
     const { firstName, lastName, phoneNumber } = body;
 
-    const db = getDatabase();
-    
-    // Update user profile
-    const updateResult = await db.query(`
-      UPDATE users 
-      SET first_name = $1, last_name = $2, phone_number = $3, updated_at = NOW()
-      WHERE user_id = $4
-      RETURNING *
-    `, [firstName, lastName, phoneNumber, decoded.userId]);
+    // Update user profile using Supabase
+    const { data: updatedUser, error: updateError } = await supabaseAuth.supabaseAdmin
+      .from('users')
+      .update({
+        first_name: firstName,
+        last_name: lastName,
+        phone_number: phoneNumber,
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', decoded.userId)
+      .select()
+      .single();
 
-    if (updateResult.rows.length === 0) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    if (updateError || !updatedUser) {
+      console.error("Error updating user profile:", updateError);
+      return NextResponse.json({ error: "User not found or update failed" }, { status: 404 });
     }
 
-    const updatedUser = updateResult.rows[0];
-
     // Create audit log
-    await db.query(`
-      INSERT INTO audit_log (user_id, operation, resource_type, resource_id, details, timestamp)
-      VALUES ($1, $2, $3, $4, $5, NOW())
-    `, [
-      decoded.userId,
-      'UPDATE',
-      'profile',
-      decoded.userId,
-      'User updated their profile information'
-    ]);
+    await supabaseAuth.supabaseAdmin
+      .from('audit_log')
+      .insert([{
+        user_id: decoded.userId,
+        operation_type: 'UPDATE',
+        table_name: 'users',
+        record_id: decoded.userId,
+        new_values: { firstName, lastName, phoneNumber },
+        timestamp: new Date().toISOString(),
+        ip_address: request.headers.get('x-forwarded-for') || 'unknown',
+        user_agent: request.headers.get('user-agent') || 'unknown'
+      }]);
 
     return NextResponse.json({
       user: {
-        id: updatedUser.user_id,
+        userId: updatedUser.user_id,
         email: updatedUser.email,
         firstName: updatedUser.first_name,
         lastName: updatedUser.last_name,
         phoneNumber: updatedUser.phone_number,
+        status: updatedUser.status,
         updatedAt: updatedUser.updated_at
       }
     });

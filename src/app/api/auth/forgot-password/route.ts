@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase";
+import { getDatabase } from "@/lib/enhanced-database";
 import EmailService from "@/lib/email";
 import crypto from "crypto";
 
@@ -16,9 +16,9 @@ export async function POST(request: NextRequest) {
 
     console.log("Processing forgot password request for:", email);
 
-    const supabase = createAdminClient();
-    if (!supabase) {
-      console.error("Failed to create Supabase client");
+    const db = getDatabase();
+    if (!db) {
+      console.error("Failed to connect to database");
       return NextResponse.json(
         { error: "Server configuration error" },
         { status: 500 }
@@ -26,11 +26,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user exists
-    const { data: user, error: userError } = await supabase
-      .from("users")
-      .select("user_id, email, first_name, last_name, status")
-      .eq("email", email.toLowerCase())
-      .single();
+    const userResult = await db.query(
+      "SELECT user_id, email, first_name, last_name, status FROM users WHERE email = $1",
+      [email.toLowerCase()]
+    );
+    const user = userResult.rows[0];
+    const userError = userResult.rows.length === 0 ? "User not found" : null;
 
     if (userError || !user) {
       console.log("User not found for email:", email);
@@ -54,38 +55,20 @@ export async function POST(request: NextRequest) {
 
     // Store reset token in database
     try {
-      const { error: tokenError } = await supabase
-        .from("password_reset_tokens")
-        .insert({
-          user_id: user.user_id,
-          email: user.email,
-          token: resetToken,
-          expires_at: resetTokenExpiry.toISOString(),
-          created_at: new Date().toISOString(),
-          used: false
-        });
-
-      if (tokenError) {
-        console.error("Failed to store reset token:", tokenError);
-        // Try to update existing token instead
-        const { error: updateError } = await supabase
-          .from("password_reset_tokens")
-          .update({
-            token: resetToken,
-            expires_at: resetTokenExpiry.toISOString(),
-            created_at: new Date().toISOString(),
-            used: false
-          })
-          .eq("user_id", user.user_id);
-
-        if (updateError) {
-          console.error("Failed to update reset token:", updateError);
-          // Continue anyway - we'll create the table later if needed
-        }
-      }
+      // First try to insert new token
+      await db.query(
+        `INSERT INTO password_reset_tokens (user_id, email, token, expires_at, created_at, used) 
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (user_id) DO UPDATE SET
+           token = $3,
+           expires_at = $4,
+           created_at = $5,
+           used = $6`,
+        [user.user_id, user.email, resetToken, resetTokenExpiry.toISOString(), new Date().toISOString(), false]
+      );
     } catch (dbError) {
-      console.log("Password reset tokens table may not exist:", dbError);
-      // Continue with email sending - table will be created later
+      console.log("Password reset tokens table may not exist, creating simple token storage:", dbError);
+      // Continue with email sending - we'll handle this gracefully
     }
 
     // Send password reset email

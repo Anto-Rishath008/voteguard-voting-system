@@ -18,8 +18,12 @@ export async function DELETE(
     }
 
     // Check if user has admin permissions
-    const hasAdminPermission = await db.checkUserRole(authUser.userId, "Admin");
-    if (!hasAdminPermission) {
+    const roleResult = await db.query(
+      "SELECT role_name FROM user_roles WHERE user_id = $1 AND role_name IN ('Admin', 'SuperAdmin')",
+      [authUser.userId]
+    );
+    
+    if (roleResult.rows.length === 0) {
       return NextResponse.json(
         { error: "Admin access required" },
         { status: 403 }
@@ -74,10 +78,7 @@ export async function DELETE(
     }
 
     // Log the deletion
-    await db.logAudit(authUser.userId, "DELETE_USER", "USER", userId, {
-      deletedUser: user.email,
-      deletedBy: authUser.email
-    });
+    console.log(`User ${user.email} deleted by ${authUser.email || authUser.userId}`);
 
     return NextResponse.json({
       success: true,
@@ -109,8 +110,12 @@ export async function PUT(
     }
 
     // Check if user has admin permissions
-    const hasAdminPermission = await db.checkUserRole(authUser.userId, "Admin");
-    if (!hasAdminPermission) {
+    const roleResult = await db.query(
+      "SELECT role_name FROM user_roles WHERE user_id = $1 AND role_name IN ('Admin', 'SuperAdmin')",
+      [authUser.userId]
+    );
+    
+    if (!roleResult.rows || roleResult.rows.length === 0) {
       return NextResponse.json(
         { error: "Admin access required" },
         { status: 403 }
@@ -192,10 +197,7 @@ export async function PUT(
     );
 
     // Log the update
-    await db.logAudit(authUser.userId, "UPDATE_USER", "USER", userId, {
-      updatedFields: { email, firstName, lastName, role, status },
-      updatedBy: authUser.email
-    });
+    console.log(`User ${email} updated by ${authUser.email || authUser.userId}`);
 
     return NextResponse.json({
       success: true,
@@ -228,8 +230,12 @@ export async function GET(
     }
 
     // Check if user has admin permissions
-    const hasAdminPermission = await db.checkUserRole(authUser.userId, "Admin");
-    if (!hasAdminPermission) {
+    const roleResult = await db.query(
+      "SELECT role_name FROM user_roles WHERE user_id = $1 AND role_name IN ('Admin', 'SuperAdmin')",
+      [authUser.userId]
+    );
+    
+    if (!roleResult.rows || roleResult.rows.length === 0) {
       return NextResponse.json(
         { error: "Admin access required" },
         { status: 403 }

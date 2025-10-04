@@ -1,53 +1,16 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { useAuth } from "@/contexts/AuthContext";
-import { Button } from "@/components/ui/Button";
-import { Card, CardContent } from "@/components/ui/Card";
-import { Alert } from "@/components/ui/Modal";
-import {
-  Vote,
-  CheckCircle,
-  Circle,
-  ArrowLeft,
-  ArrowRight,
-  Shield,
-  Lock,
-  AlertTriangle,
-  Info,
-} from "lucide-react";
-
-interface Candidate {
-  id: string;
-  name: string;
-  party: string;
-  description: string;
-  imageUrl?: string;
-}
-
-interface Contest {
-  id: string;
-  title: string;
-  description: string;
-  maxSelections: number;
-  contestType: string;
-  candidates: Candidate[];
-}
+import { useState, useEffect } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import VotingInterface from '@/components/VotingInterface';
 
 interface Election {
-  id: string;
-  title: string;
+  election_id: string;
+  election_name: string;
   description: string;
   status: string;
-  startDate: string;
-  endDate: string;
-  contests: Contest[];
-}
-
-interface BallotSelection {
-  contestId: string;
-  candidateIds: string[];
+  start_date: string;
+  end_date: string;
 }
 
 export default function VotePage() {

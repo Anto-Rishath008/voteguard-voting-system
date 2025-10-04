@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase";
+import { getDatabase } from "@/lib/enhanced-database";
 import crypto from "crypto";
 
 // Hash OTP for verification
@@ -28,8 +28,8 @@ export async function POST(request: NextRequest) {
     const otpSecret = process.env.OTP_SECRET || "default-otp-secret-key";
     const hashedInputOTP = hashOTP(otp, otpSecret);
 
-    const supabase = createAdminClient();
-    if (!supabase) {
+    const db = getDatabase();
+    if (!db) {
       return NextResponse.json(
         { error: "Database connection failed" },
         { status: 500 }
@@ -39,20 +39,16 @@ export async function POST(request: NextRequest) {
     // Check OTP in database
     let otpRecord = null;
     try {
-      const { data, error } = await supabase
-        .from("otp_verifications")
-        .select("*")
-        .eq("email", email.toLowerCase())
-        .eq("type", type)
-        .eq("verified", false)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
+      const result = await db.query(
+        `SELECT * FROM otp_verifications 
+         WHERE email = $1 AND type = $2 AND verified = false
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [email.toLowerCase(), type]
+      );
 
-      if (error) {
-        console.log("OTP lookup failed (table may not exist):", error);
-      } else {
-        otpRecord = data;
+      if (result.rows && result.rows.length > 0) {
+        otpRecord = result.rows[0];
       }
     } catch (dbError) {
       console.log("Database OTP verification failed:", dbError);
@@ -67,10 +63,10 @@ export async function POST(request: NextRequest) {
       // Update attempts if record exists
       if (otpRecord) {
         try {
-          await supabase
-            .from("otp_verifications")
-            .update({ attempts: (otpRecord.attempts || 0) + 1 })
-            .eq("id", otpRecord.id);
+          await db.query(
+            `UPDATE otp_verifications SET attempts = $1 WHERE id = $2`,
+            [(otpRecord.attempts || 0) + 1, otpRecord.id]
+          );
         } catch (updateError) {
           console.log("Failed to update OTP attempts:", updateError);
         }
@@ -85,13 +81,10 @@ export async function POST(request: NextRequest) {
     // Mark OTP as verified
     if (otpRecord) {
       try {
-        await supabase
-          .from("otp_verifications")
-          .update({ 
-            verified: true, 
-            verified_at: new Date().toISOString() 
-          })
-          .eq("id", otpRecord.id);
+        await db.query(
+          `UPDATE otp_verifications SET verified = true, verified_at = $1 WHERE id = $2`,
+          [new Date().toISOString(), otpRecord.id]
+        );
       } catch (updateError) {
         console.log("Failed to mark OTP as verified:", updateError);
       }

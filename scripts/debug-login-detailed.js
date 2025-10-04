@@ -1,4 +1,4 @@
-const { createClient } = require("@supabase/supabase-js");
+const { Client } = require("pg");
 const bcrypt = require("bcryptjs");
 const fs = require("fs");
 const path = require("path");
@@ -15,14 +15,9 @@ envContent.split("\n").forEach((line) => {
   }
 });
 
-const supabaseUrl = envVars.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = envVars.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-  },
+// Create database client
+const client = new Client({
+  connectionString: envVars.DATABASE_URL,
 });
 
 async function debugLogin() {
@@ -36,17 +31,22 @@ async function debugLogin() {
   console.log(`Using password: ${testPassword}\n`);
 
   try {
-    // 1. Check if user exists
-    const { data: user, error: userError } = await supabase
-      .from("users")
-      .select("*")
-      .eq("email", testEmail.toLowerCase())
-      .single();
+    // Connect to database
+    await client.connect();
+    console.log("✅ Connected to Azure PostgreSQL database\n");
 
-    if (userError || !user) {
-      console.log("❌ User not found:", userError?.message || "No user data");
+    // 1. Check if user exists
+    const userResult = await client.query(
+      "SELECT * FROM users WHERE email = $1",
+      [testEmail.toLowerCase()]
+    );
+
+    if (userResult.rows.length === 0) {
+      console.log("❌ User not found");
       return;
     }
+
+    const user = userResult.rows[0];
 
     console.log("✅ User found:");
     console.log(`   ID: ${user.user_id}`);
@@ -56,49 +56,36 @@ async function debugLogin() {
     console.log(`   Failed attempts: ${user.failed_login_attempts || 0}`);
     console.log(`   Locked until: ${user.locked_until || "Not locked"}\n`);
 
-    // 2. Test password verification function
-    console.log("🔐 Testing password verification function...");
+    // 2. Test password verification with bcrypt
+    console.log("🔐 Testing password verification...");
     
-    try {
-      const { data: functionResult, error: functionError } = await supabase.rpc(
-        "verify_password",
-        {
-          password: testPassword,
-          hash: user.password_hash,
-        }
-      );
-
-      if (functionError) {
-        console.log("❌ Function error:", functionError.message);
-        
-        // Try bcrypt verification as fallback
-        console.log("\n🔄 Trying bcrypt verification...");
-        if (user.password_hash) {
-          const bcryptValid = await bcrypt.compare(testPassword, user.password_hash);
-          console.log(`   Bcrypt result: ${bcryptValid ? "✅ Valid" : "❌ Invalid"}`);
-        }
-      } else {
-        console.log(`   Function result: ${functionResult ? "✅ Valid" : "❌ Invalid"}`);
-      }
-    } catch (err) {
-      console.log("❌ Function call failed:", err.message);
+    if (user.password_hash) {
+      const bcryptValid = await bcrypt.compare(testPassword, user.password_hash);
+      console.log(`   Bcrypt result: ${bcryptValid ? "✅ Valid" : "❌ Invalid"}`);
+    } else {
+      console.log("   ❌ No password hash found");
     }
 
     // 3. Check if pgcrypto extension is enabled
     console.log("\n🔧 Checking database extensions...");
-    const { data: extensions, error: extError } = await supabase
-      .from("pg_extension")
-      .select("extname")
-      .in("extname", ["pgcrypto", "uuid-ossp"]);
-
-    if (extError) {
-      console.log("⚠️  Could not check extensions:", extError.message);
-    } else {
-      console.log("   Installed extensions:", extensions.map(e => e.extname).join(", "));
+    try {
+      const extensionsResult = await client.query(
+        "SELECT extname FROM pg_extension WHERE extname IN ('pgcrypto', 'uuid-ossp')"
+      );
+      
+      if (extensionsResult.rows.length > 0) {
+        console.log("   Installed extensions:", extensionsResult.rows.map(e => e.extname).join(", "));
+      } else {
+        console.log("   ⚠️  No required extensions found");
+      }
+    } catch (extError) {
+      console.log("   ⚠️  Could not check extensions:", extError.message);
     }
 
   } catch (error) {
     console.log("❌ Debug failed:", error.message);
+  } finally {
+    await client.end();
   }
 }
 

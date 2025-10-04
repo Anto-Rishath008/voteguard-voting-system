@@ -1,14 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase";
 import { verifyJWT } from "@/lib/auth";
-import { v4 as uuidv4 } from "uuid";
-import crypto from "crypto";
+import { getDatabase } from "@/lib/enhanced-database";
+import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 
-interface BallotSelection {
-  contestId: string;
-  candidateIds: string[];
-}
-
+// POST /api/elections/[id]/vote - Submit votes for an election
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -16,47 +12,56 @@ export async function POST(
   try {
     const resolvedParams = await params;
     const electionId = resolvedParams.id;
-    const body = await request.json();
-    const { selections }: { selections: BallotSelection[] } = body;
+    const { selections } = await request.json(); // selections: array of { contestId, candidateIds }
 
-    // Verify user authentication using local auth
+    // Verify user authentication
     const { user: authUser, error: authError } = verifyJWT(request);
     if (authError || !authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const supabase = createAdminClient();
+    const db = getDatabase();
 
-    // Verify election exists and is active
-    const { data: election, error: electionError } = await supabase
-      .from("elections")
-      .select("election_id, status")
-      .eq("election_id", electionId)
-      .single();
+    // Check if election exists and is active
+    const electionResult = await db.query(
+      "SELECT election_name, status FROM elections WHERE election_id = $1",
+      [electionId]
+    );
 
-    if (electionError || !election) {
+    if (electionResult.rows.length === 0) {
       return NextResponse.json(
         { error: "Election not found" },
         { status: 404 }
       );
     }
 
-    if (election.status !== "Active") {
+    if (electionResult.rows[0].status !== 'Active') {
       return NextResponse.json(
         { error: "Election is not active" },
         { status: 400 }
       );
     }
 
-    // Check if user has already voted
-    const { data: existingVote } = await supabase
-      .from("votes")
-      .select("vote_id")
-      .eq("election_id", electionId)
-      .eq("user_id", authUser.userId)
-      .single();
+    // Check if user is eligible to vote
+    const eligibilityResult = await db.query(
+      "SELECT status FROM eligible_voters WHERE election_id = $1 AND user_id = $2",
+      [electionId, authUser.userId]
+    );
 
-    if (existingVote) {
+    if (eligibilityResult.rows.length === 0 || eligibilityResult.rows[0].status !== 'eligible') {
+      return NextResponse.json(
+        { error: "You are not eligible to vote in this election" },
+        { status: 403 }
+      );
+    }
+
+    // Check if user has already voted
+    const existingVoteResult = await db.query(
+      "SELECT vote_id FROM votes WHERE voter_id = $1 AND election_id = $2 LIMIT 1",
+      [authUser.userId, electionId]
+    );
+
+    if (existingVoteResult.rows.length > 0) {
       return NextResponse.json(
         { error: "You have already voted in this election" },
         { status: 400 }
@@ -64,10 +69,11 @@ export async function POST(
     }
 
     // Validate selections against contests
-    const { data: contests } = await supabase
-      .from("contests")
-      .select("id, max_selections")
-      .eq("election_id", electionId);
+    const contestsResult = await db.query(
+      `SELECT contest_id as id, max_selections FROM contests WHERE election_id = $1`,
+      [electionId]
+    );
+    const contests = contestsResult.rows;
 
     for (const selection of selections) {
       const contest = contests?.find((c) => c.id === selection.contestId);
@@ -91,15 +97,15 @@ export async function POST(
 
       // Validate candidate IDs exist for this contest
       if (selection.candidateIds.length > 0) {
-        const { data: candidates } = await supabase
-          .from("candidates")
-          .select("id")
-          .eq("contest_id", selection.contestId)
-          .in("id", selection.candidateIds);
+        const candidatesResult = await db.query(
+          `SELECT candidate_id as id FROM candidates 
+           WHERE contest_id = $1 AND candidate_id = ANY($2)`,
+          [selection.contestId, selection.candidateIds]
+        );
 
         if (
-          !candidates ||
-          candidates.length !== selection.candidateIds.length
+          !candidatesResult.rows ||
+          candidatesResult.rows.length !== selection.candidateIds.length
         ) {
           return NextResponse.json(
             {
@@ -130,37 +136,38 @@ export async function POST(
       .digest("hex");
 
     // Get previous vote hash for chaining
-    const { data: lastVote } = await supabase
-      .from("votes")
-      .select("vote_hash")
-      .eq("election_id", electionId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
+    const lastVoteResult = await db.query(
+      `SELECT ballot_hash FROM votes ORDER BY created_at DESC LIMIT 1`
+    );
+    const lastVote = lastVoteResult.rows.length > 0 ? lastVoteResult.rows[0] : null;
 
-    const previousHash = lastVote?.vote_hash || "0";
+    const previousHash = lastVote?.ballot_hash || "0";
     const chainedData = previousHash + ballotHash;
     const voteHash = crypto
       .createHash("sha256")
       .update(chainedData)
       .digest("hex");
 
-    // Start transaction
-    const { error: voteError } = await supabase.from("votes").insert({
-      id: voteId,
-      election_id: electionId,
-      user_id: authUser.userId,
-      ballot_hash: ballotHash,
-      vote_hash: voteHash,
-      previous_vote_hash: previousHash,
-      cast_at: timestamp,
-      ip_address:
-        request.headers.get("x-forwarded-for") ||
-        request.headers.get("x-real-ip") ||
-        "unknown",
-    });
-
-    if (voteError) {
+    // Start transaction - Insert vote record
+    try {
+      await db.query(
+        `INSERT INTO votes (vote_id, election_id, user_id, ballot_hash, vote_hash, previous_vote_hash, cast_at, ip_address, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [
+          voteId,
+          electionId,
+          authUser.userId,
+          ballotHash,
+          voteHash,
+          previousHash,
+          timestamp,
+          request.headers.get("x-forwarded-for") ||
+          request.headers.get("x-real-ip") ||
+          "unknown",
+          timestamp
+        ]
+      );
+    } catch (voteError) {
       console.error("Error creating vote:", voteError);
       return NextResponse.json(
         { error: "Failed to record vote" },
@@ -183,14 +190,32 @@ export async function POST(
     }
 
     if (ballotSelections.length > 0) {
-      const { error: selectionsError } = await supabase
-        .from("ballot_selections")
-        .insert(ballotSelections);
-
-      if (selectionsError) {
+      try {
+        // Insert ballot selections
+        const selectionsQuery = `
+          INSERT INTO ballot_selections (vote_id, contest_id, candidate_id, selection_order, created_at)
+          VALUES ${ballotSelections.map((_, i) => 
+            `($${i * 5 + 1}, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5})`
+          ).join(', ')}
+        `;
+        
+        const selectionsParams = ballotSelections.flatMap(selection => [
+          selection.vote_id,
+          selection.contest_id,
+          selection.candidate_id,
+          selection.selection_order,
+          timestamp
+        ]);
+        
+        await db.query(selectionsQuery, selectionsParams);
+      } catch (selectionsError) {
         console.error("Error recording ballot selections:", selectionsError);
         // Try to clean up the vote record
-        await supabase.from("votes").delete().eq("id", voteId);
+        try {
+          await db.query(`DELETE FROM votes WHERE vote_id = $1`, [voteId]);
+        } catch (cleanupError) {
+          console.error("Failed to cleanup vote record:", cleanupError);
+        }
         return NextResponse.json(
           { error: "Failed to record ballot selections" },
           { status: 500 }
@@ -199,31 +224,45 @@ export async function POST(
     }
 
     // Create audit log
-    await supabase.from("audit_log").insert({
-      user_id: authUser.userId,
-      operation_type: "VOTE_CAST",
-      resource_type: "election",
-      resource_id: electionId,
-      details: {
-        vote_id: voteId,
-        contests_voted: selections.length,
-        total_selections: selections.reduce(
-          (sum, s) => sum + s.candidateIds.length,
-          0
-        ),
-      },
-      ip_address:
-        request.headers.get("x-forwarded-for") ||
-        request.headers.get("x-real-ip") ||
-        "unknown",
-      user_agent: request.headers.get("user-agent") || "unknown",
-    });
+    try {
+      await db.query(
+        `INSERT INTO audit_logs (user_id, action, table_name, record_id, changes, ip_address, user_agent, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          authUser.userId,
+          "VOTE_CAST",
+          "election",
+          electionId,
+          JSON.stringify({
+            vote_id: voteId,
+            contests_voted: selections.length,
+            total_selections: selections.reduce(
+              (sum, s) => sum + s.candidateIds.length,
+              0
+            ),
+          }),
+          request.headers.get("x-forwarded-for") ||
+          request.headers.get("x-real-ip") ||
+          "unknown",
+          request.headers.get("user-agent") || "unknown",
+          timestamp
+        ]
+      );
+    } catch (auditError) {
+      console.log("Audit log table may not exist:", auditError);
+    }
 
     return NextResponse.json({
       success: true,
-      voteId,
-      message: "Ballot cast successfully",
+      message: "Vote cast successfully",
+      data: {
+        voteId,
+        ballotHash,
+        voteHash,
+        timestamp,
+      },
     });
+
   } catch (error) {
     console.error("Vote submission error:", error);
     return NextResponse.json(

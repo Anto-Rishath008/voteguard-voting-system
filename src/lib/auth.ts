@@ -119,14 +119,13 @@ export class AuthService {
       // Clear token cookie (only in browser)
       if (typeof window !== 'undefined') {
         document.cookie = "auth-token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
-        window.location.href = "/login";
+        // Don't redirect immediately - let the AuthContext handle state updates
       }
     } catch (error) {
       console.error("Logout error:", error);
       // Still clear the cookie even if API call fails
       if (typeof window !== 'undefined') {
         document.cookie = "auth-token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
-        window.location.href = "/login";
       }
     }
   }
@@ -170,17 +169,21 @@ export class AuthService {
 export function verifyJWT(request: NextRequest): { user: JWTPayload | null; error: string | null } {
   try {
     const token = request.cookies.get("auth-token")?.value;
+    console.log("verifyJWT - Token present:", !!token);
     
     if (!token) {
+      console.log("verifyJWT - No token found");
       return { user: null, error: "No authentication token" };
     }
 
     const secret = process.env.JWT_SECRET;
     if (!secret) {
+      console.log("verifyJWT - JWT secret not configured");
       return { user: null, error: "JWT secret not configured" };
     }
 
     const decoded = verify(token, secret) as JWTPayload;
+    console.log("verifyJWT - Successfully decoded for user:", decoded.userId);
     return { user: decoded, error: null };
   } catch (error) {
     console.error("JWT verification error:", error);

@@ -1,4 +1,3 @@
-const { createClient } = require("@supabase/supabase-js");
 const fs = require("fs");
 const path = require("path");
 
@@ -13,11 +12,6 @@ envContent.split("\n").forEach((line) => {
     envVars[key.trim()] = value.trim();
   }
 });
-
-const supabaseUrl = envVars.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = envVars.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 async function testLoginAPI() {
   console.log("🧪 Testing Login API Directly...\n");

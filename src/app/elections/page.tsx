@@ -270,7 +270,7 @@ export default function ElectionsPage() {
                           <Users className="h-4 w-4" />
                           <div>
                             <div className="font-medium">Eligible Voters</div>
-                            <div>{election.totalVoters.toLocaleString()}</div>
+                            <div>{(election.totalVoters || 0).toLocaleString()}</div>
                           </div>
                         </div>
                       </div>

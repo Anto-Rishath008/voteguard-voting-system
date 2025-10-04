@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase";
+import { getDatabase } from "@/lib/enhanced-database";
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,9 +14,9 @@ export async function POST(request: NextRequest) {
 
     console.log("Validating reset token...");
 
-    const supabase = createAdminClient();
-    if (!supabase) {
-      console.error("Failed to create Supabase client");
+    const db = getDatabase();
+    if (!db) {
+      console.error("Failed to connect to database");
       return NextResponse.json(
         { error: "Server configuration error" },
         { status: 500 }
@@ -25,15 +25,13 @@ export async function POST(request: NextRequest) {
 
     try {
       // Check if token exists and is valid
-      const { data: tokenData, error: tokenError } = await supabase
-        .from("password_reset_tokens")
-        .select("*")
-        .eq("token", token)
-        .eq("used", false)
-        .gt("expires_at", new Date().toISOString())
-        .single();
+      const tokenResult = await db.query(
+        `SELECT * FROM password_reset_tokens 
+         WHERE token = $1 AND used = false AND expires_at > $2`,
+        [token, new Date().toISOString()]
+      );
 
-      if (tokenError || !tokenData) {
+      if (!tokenResult.rows || tokenResult.rows.length === 0) {
         console.log("Invalid or expired token");
         return NextResponse.json(
           { error: "Invalid or expired reset token" },

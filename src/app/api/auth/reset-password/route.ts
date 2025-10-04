@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase";
+import { getDatabase } from "@/lib/enhanced-database";
 import bcrypt from "bcryptjs";
 
 export async function POST(request: NextRequest) {
@@ -23,9 +23,9 @@ export async function POST(request: NextRequest) {
 
     console.log("Processing password reset...");
 
-    const supabase = createAdminClient();
-    if (!supabase) {
-      console.error("Failed to create Supabase client");
+    const db = getDatabase();
+    if (!db) {
+      console.error("Failed to connect to database");
       return NextResponse.json(
         { error: "Server configuration error" },
         { status: 500 }
@@ -34,15 +34,13 @@ export async function POST(request: NextRequest) {
 
     try {
       // Verify token is valid and not used
-      const { data: tokenData, error: tokenError } = await supabase
-        .from("password_reset_tokens")
-        .select("*")
-        .eq("token", token)
-        .eq("used", false)
-        .gt("expires_at", new Date().toISOString())
-        .single();
+      const tokenResult = await db.query(
+        `SELECT * FROM password_reset_tokens 
+         WHERE token = $1 AND used = false AND expires_at > $2`,
+        [token, new Date().toISOString()]
+      );
 
-      if (tokenError || !tokenData) {
+      if (!tokenResult.rows || tokenResult.rows.length === 0) {
         console.log("Invalid or expired token");
         return NextResponse.json(
           { error: "Invalid or expired reset token" },
@@ -50,40 +48,29 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      const tokenData = tokenResult.rows[0];
+
       // Hash the new password
       const saltRounds = 12;
       const hashedPassword = await bcrypt.hash(password, saltRounds);
 
       // Update user's password
-      const { error: updateError } = await supabase
-        .from("users")
-        .update({
-          password_hash: hashedPassword,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("user_id", tokenData.user_id);
-
-      if (updateError) {
-        console.error("Failed to update password:", updateError);
-        return NextResponse.json(
-          { error: "Failed to update password" },
-          { status: 500 }
-        );
-      }
+      await db.query(
+        `UPDATE users SET 
+         password_hash = $1, 
+         updated_at = $2 
+         WHERE id = $3`,
+        [hashedPassword, new Date().toISOString(), tokenData.user_id]
+      );
 
       // Mark token as used
-      const { error: tokenUpdateError } = await supabase
-        .from("password_reset_tokens")
-        .update({
-          used: true,
-          used_at: new Date().toISOString(),
-        })
-        .eq("token", token);
-
-      if (tokenUpdateError) {
-        console.error("Failed to mark token as used:", tokenUpdateError);
-        // Continue anyway - password was updated successfully
-      }
+      await db.query(
+        `UPDATE password_reset_tokens SET 
+         used = true, 
+         used_at = $1 
+         WHERE token = $2`,
+        [new Date().toISOString(), token]
+      );
 
       console.log("Password reset successful for user:", tokenData.user_id);
 

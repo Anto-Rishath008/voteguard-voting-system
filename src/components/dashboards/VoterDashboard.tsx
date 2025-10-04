@@ -36,7 +36,7 @@ interface VoterStats {
 }
 
 export default function VoterDashboard() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, loading: authLoading } = useAuth();
   const [elections, setElections] = useState<Election[]>([]);
   const [stats, setStats] = useState<VoterStats>({
     totalElections: 0,
@@ -48,24 +48,118 @@ export default function VoterDashboard() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetchVoterDashboardData();
-  }, []);
+    console.log('🔄 VoterDashboard useEffect triggered', { user: !!user, authLoading, loading });
+    
+    // Wait for auth to finish loading
+    if (authLoading) {
+      console.log('⏳ Auth still loading, waiting...');
+      return;
+    }
+    
+    // Only fetch data if user is authenticated and has proper role
+    if (user) {
+      console.log('✅ User found, fetching dashboard data');
+      fetchVoterDashboardData();
+    } else {
+      console.log('❌ No user, setting error');
+      setLoading(false);
+      setError("Please log in to view dashboard");
+    }
+  }, [user, authLoading]);
+
+  // Early return if not authenticated - don't render anything that could trigger API calls
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <Vote className="h-12 w-12 text-blue-600 mx-auto animate-pulse" />
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <Vote className="h-12 w-12 text-gray-600 mx-auto" />
+          <p className="mt-4 text-gray-600">Please log in to view your dashboard</p>
+          <p className="mt-2 text-sm text-gray-500">You will be redirected to login automatically</p>
+        </div>
+      </div>
+    );
+  }
 
   const fetchVoterDashboardData = async () => {
+    console.log('🚀 fetchVoterDashboardData called', { user: !!user, loading, authLoading });
+    
+    // Don't make API calls if user is not authenticated
+    if (!user) {
+      console.log('❌ No user found, setting error');
+      setLoading(false);
+      setError("Please log in to view dashboard");
+      return;
+    }
+
     try {
+      console.log('📡 Making fetch request to /api/dashboard');
       const response = await fetch("/api/dashboard", {
         credentials: "include",
       });
+      
+      console.log('📊 Dashboard API response:', response.status, response.ok);
 
       if (!response.ok) {
-        throw new Error("Failed to fetch dashboard data");
+        const errorText = await response.text();
+        console.error("Dashboard API error:", response.status, errorText);
+        
+        // If 401, user is not authenticated - don't retry
+        if (response.status === 401) {
+          setError("Please log in to view dashboard");
+          setLoading(false);
+          return;
+        }
+        
+        throw new Error(`Failed to fetch dashboard data: ${response.status} ${response.statusText}`);
       }
 
       const data = await response.json();
-      setElections(data.elections);
-      setStats(data.stats);
+      
+      console.log('📊 Dashboard API response data:', data);
+      console.log('📈 Stats structure:', data.stats);
+      console.log('� Data structure:', data.data);
+      console.log('�🔍 Looking for totalElections in data.stats:', data.stats?.totalElections);
+      console.log('🔍 Looking for totalElections in data.data.stats:', data.data?.stats?.totalElections);
+      
+      // Handle nested response structure - API returns { success: true, data: { ... } }
+      const responseData = data.data || data;
+      
+      // Safely set elections with fallback
+      setElections(responseData.elections || []);
+      
+      // Safely set stats with fallback to default values
+      setStats({
+        totalElections: responseData.stats?.totalElections || 0,
+        activeElections: responseData.stats?.activeElections || 0,
+        votedElections: responseData.stats?.votedElections || 0,
+        upcomingElections: responseData.stats?.upcomingElections || 0,
+      });
+      
+      console.log('✅ Stats set to:', {
+        totalElections: responseData.stats?.totalElections || 0,
+        activeElections: responseData.stats?.activeElections || 0,
+        votedElections: responseData.stats?.votedElections || 0,
+        upcomingElections: responseData.stats?.upcomingElections || 0,
+      });
     } catch (err: any) {
-      setError(err.message);
+      console.error('Dashboard fetch error:', err);
+      if (err.message.includes("401")) {
+        setError("Please log in to view dashboard");
+      } else {
+        setError(err.message);
+      }
+      // Keep default values for stats on error
     } finally {
       setLoading(false);
     }
@@ -107,6 +201,7 @@ export default function VoterDashboard() {
     });
   };
 
+  // Show loading if component is still loading data
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -168,7 +263,7 @@ export default function VoterDashboard() {
                     Available Elections
                   </p>
                   <p className="text-2xl font-semibold text-gray-900">
-                    {stats.totalElections}
+                    {stats?.totalElections || 0}
                   </p>
                 </div>
               </div>
@@ -186,7 +281,7 @@ export default function VoterDashboard() {
                     Active Now
                   </p>
                   <p className="text-2xl font-semibold text-gray-900">
-                    {stats.activeElections}
+                    {stats?.activeElections || 0}
                   </p>
                 </div>
               </div>
@@ -202,7 +297,7 @@ export default function VoterDashboard() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">My Votes</p>
                   <p className="text-2xl font-semibold text-gray-900">
-                    {stats.votedElections}
+                    {stats?.votedElections || 0}
                   </p>
                 </div>
               </div>
@@ -218,7 +313,7 @@ export default function VoterDashboard() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">Upcoming</p>
                   <p className="text-2xl font-semibold text-gray-900">
-                    {stats.upcomingElections}
+                    {stats?.upcomingElections || 0}
                   </p>
                 </div>
               </div>
@@ -227,14 +322,14 @@ export default function VoterDashboard() {
         </div>
 
         {/* Active Elections - Priority Section */}
-        {stats.activeElections > 0 && (
+        {(stats?.activeElections || 0) > 0 && (
           <div className="mb-8">
             <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg p-6 text-white">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-2xl font-bold">🗳️ Ready to Vote!</h2>
                   <p className="mt-1">
-                    You have {stats.activeElections} active election{stats.activeElections > 1 ? 's' : ''} waiting for your vote
+                    You have {stats?.activeElections || 0} active election{(stats?.activeElections || 0) > 1 ? 's' : ''} waiting for your vote
                   </p>
                 </div>
                 <Button

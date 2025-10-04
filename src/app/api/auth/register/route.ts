@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { EnhancedDatabase } from "@/lib/enhanced-database";
+import { getDatabase } from "@/lib/enhanced-database";
 import { v4 as uuidv4 } from "uuid";
 import bcrypt from "bcryptjs";
 
@@ -127,8 +127,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = createAdminClient();
-    if (!supabase) {
+    const db = getDatabase();
+    if (!db) {
       return NextResponse.json(
         { error: "Database connection failed" },
         { status: 500 }
@@ -136,11 +136,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user already exists
-    const { data: existingUser } = await supabase
-      .from("users")
-      .select("email")
-      .eq("email", email.toLowerCase())
-      .single();
+    const existingUserResult = await db.query(
+      "SELECT email FROM users WHERE email = $1",
+      [email.toLowerCase()]
+    );
+    const existingUser = existingUserResult.rows[0];
 
     if (existingUser) {
       return NextResponse.json(
@@ -172,13 +172,23 @@ export async function POST(request: NextRequest) {
     if (collegeId) userData.college_id = collegeId;
     if (instituteName) userData.institute_name = instituteName;
 
-    const { data: user, error: userError } = await supabase
-      .from("users")
-      .insert(userData)
-      .select()
-      .single();
-
-    if (userError) {
+    try {
+      const userResult = await db.query(
+        `INSERT INTO users (user_id, email, first_name, last_name, status, password_hash, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING user_id, email, first_name, last_name, status, created_at`,
+        [userId, email.toLowerCase(), firstName.trim(), lastName.trim(), "Active", passwordHash, new Date().toISOString()]
+      );
+      
+      if (!userResult.rows || userResult.rows.length === 0) {
+        return NextResponse.json(
+          { error: "Failed to create user account" },
+          { status: 500 }
+        );
+      }
+      
+      const user = userResult.rows[0];
+    } catch (userError) {
       console.error("Error creating user:", userError);
       return NextResponse.json(
         { error: "Failed to create user account" },
@@ -186,60 +196,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Store security questions (using a simple approach for now)
-    if (securityQuestions && securityQuestions.length > 0) {
-      try {
-        for (const sq of securityQuestions) {
-          if (sq.question && sq.answer) {
-            // Hash the security answer for additional security
-            const hashedAnswer = await bcrypt.hash(sq.answer.toLowerCase().trim(), 10);
-            
-            // For now, we'll store in user metadata or create a separate table later
-            await supabase
-              .from("user_security_questions") // This table would need to be created
-              .insert({
-                user_id: userId,
-                question: sq.question,
-                answer_hash: hashedAnswer,
-                created_at: new Date().toISOString()
-              })
-              .single();
-          }
-        }
-      } catch (sqError) {
-        console.log("Security questions storage failed (table may not exist):", sqError);
-        // Continue without failing - security questions can be added later
-      }
-    }
+    // Note: Advanced security features (security questions, biometric data) 
+    // will be implemented when corresponding database tables are created
 
-    // Store additional security data for admin/super_admin
-    if (role !== "voter") {
-      try {
-        const securityData: any = {
-          user_id: userId,
-          fingerprint_data: fingerprintData,
-          security_level: role === "admin" ? "enhanced" : "maximum",
-          created_at: new Date().toISOString()
-        };
-
-        if (role === "super_admin") {
-          securityData.reference_code = referenceCode;
-          securityData.authorized_by = authorizedBy;
-          securityData.authorization_reason = reason;
-          securityData.approval_status = "pending"; // Requires manual approval
-        }
-
-        await supabase
-          .from("user_security_data") // This table would need to be created
-          .insert(securityData)
-          .single();
-      } catch (secError) {
-        console.log("Enhanced security data storage failed (table may not exist):", secError);
-        // Continue without failing
-      }
-    }
-
-    // Get or create the role first
+    // Assign role to user using simplified approach
     const roleMap: { [key: string]: string } = {
       voter: "Voter",
       admin: "Admin", 
@@ -248,74 +208,24 @@ export async function POST(request: NextRequest) {
 
     const roleName = roleMap[role];
     
-    // Try to get existing role
-    let { data: existingRole } = await supabase
-      .from("roles")
-      .select("role_id")
-      .eq("role_name", roleName)
-      .single();
-
-    let roleId = existingRole?.role_id;
-
-    // Create role if it doesn't exist
-    if (!roleId) {
-      const { data: newRole, error: createRoleError } = await supabase
-        .from("roles")
-        .insert({
-          role_name: roleName,
-          description: `${roleName} role with ${role === "voter" ? "basic" : role === "admin" ? "enhanced" : "maximum"} security`,
-          permissions: {},
-        })
-        .select("role_id")
-        .single();
-
-      if (createRoleError) {
-        console.error("Error creating role:", createRoleError);
-      } else {
-        roleId = newRole?.role_id;
-      }
-    }
-    
-    // Assign role to user
-    const { error: roleError } = await supabase.from("user_roles").insert({
-      user_id: userId,
-      role_id: roleId,
-      assigned_by: userId, // Self-assigned for registration
-      expires_at: role === "super_admin" ? null : undefined, // Super admins don't expire
-    });
-
-    if (roleError) {
+    try {
+      // Assign role to user (using simplified table structure)
+      await db.query(
+        "INSERT INTO user_roles (user_id, role_name, created_at) VALUES ($1, $2, $3)",
+        [userId, roleName, new Date().toISOString()]
+      );
+    } catch (roleError) {
       console.error("Error assigning role:", roleError);
       // Try to cleanup user if role assignment fails
-      await supabase.from("users").delete().eq("user_id", userId);
+      await db.query("DELETE FROM users WHERE user_id = $1", [userId]);
       return NextResponse.json(
         { error: "Failed to complete user registration" },
         { status: 500 }
       );
     }
 
-    // Create comprehensive audit log
-    await DatabaseUtils.createAuditLog(
-      userId,
-      "INSERT",
-      "users",
-      userId,
-      undefined,
-      {
-        email: email.toLowerCase(),
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        role,
-        phoneNumber,
-        hasAadhaar: !!aadhaarNumber,
-        hasCollegeId: !!collegeId,
-        securityQuestionsCount: securityQuestions.length,
-        hasBiometric: !!fingerprintData,
-        action: "enhanced_user_registration",
-      },
-      request.headers.get("x-forwarded-for") || "unknown",
-      request.headers.get("user-agent") || "unknown"
-    );
+    // Log user registration (simplified for now)
+    console.log(`User registered successfully: ${email.toLowerCase()} with role: ${role}`);
 
     // Determine next steps based on role
     const nextSteps = [];

@@ -45,7 +45,7 @@ interface SystemMetric {
 }
 
 export default function SuperAdminDashboard() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, loading: authLoading } = useAuth();
   const router = useRouter();
   const [stats, setStats] = useState<SuperAdminStats>({
     totalElections: 0,
@@ -62,8 +62,19 @@ export default function SuperAdminDashboard() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetchSuperAdminDashboardData();
-  }, []);
+    // Wait for auth to finish loading
+    if (authLoading) {
+      return;
+    }
+    
+    // Only fetch data if user is authenticated
+    if (user) {
+      fetchSuperAdminDashboardData();
+    } else {
+      setLoading(false);
+      setError("Please log in to view dashboard");
+    }
+  }, [user, authLoading]);
 
   const fetchSuperAdminDashboardData = async () => {
     try {
@@ -131,12 +142,25 @@ export default function SuperAdminDashboard() {
     return "text-red-600";
   };
 
-  if (loading) {
+  // Show loading if auth is loading or component is loading
+  if (authLoading || loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <Shield className="h-12 w-12 text-purple-600 mx-auto animate-pulse" />
           <p className="mt-4 text-gray-600">Loading super admin dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error or login message if not authenticated
+  if (!user || error.includes("Please log in")) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <Shield className="h-12 w-12 text-gray-600 mx-auto" />
+          <p className="mt-4 text-gray-600">Please log in to view your dashboard</p>
         </div>
       </div>
     );
@@ -184,14 +208,14 @@ export default function SuperAdminDashboard() {
               <div>
                 <h2 className="text-2xl font-bold flex items-center">
                   <Activity className="h-6 w-6 mr-2" />
-                  System Health: {stats.systemHealth}%
+                  System Health: {stats?.systemHealth || 0}%
                 </h2>
                 <p className="mt-1">
-                  All systems operational - {stats.securityAlerts} security alert{stats.securityAlerts > 1 ? 's' : ''}
+                  All systems operational - {stats?.securityAlerts || 0} security alert{(stats?.securityAlerts || 0) > 1 ? 's' : ''}
                 </p>
               </div>
               <div className="text-right">
-                <div className="text-3xl font-bold">{stats.serverUptime}</div>
+                <div className="text-3xl font-bold">{stats?.serverUptime || '0d 0h'}</div>
                 <div className="text-sm opacity-90">Uptime</div>
               </div>
             </div>
@@ -209,7 +233,7 @@ export default function SuperAdminDashboard() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">Total Elections</p>
                   <p className="text-2xl font-semibold text-gray-900">
-                    {stats.totalElections}
+                    {stats?.totalElections || 0}
                   </p>
                 </div>
               </div>
@@ -225,7 +249,7 @@ export default function SuperAdminDashboard() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">Administrators</p>
                   <p className="text-2xl font-semibold text-gray-900">
-                    {stats.totalAdmins}
+                    {stats?.totalAdmins || 0}
                   </p>
                 </div>
               </div>
@@ -241,7 +265,7 @@ export default function SuperAdminDashboard() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">Total Users</p>
                   <p className="text-2xl font-semibold text-gray-900">
-                    {stats.totalVoters}
+                    {stats?.totalVoters || 0}
                   </p>
                 </div>
               </div>
@@ -257,7 +281,7 @@ export default function SuperAdminDashboard() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">Total Votes</p>
                   <p className="text-2xl font-semibold text-gray-900">
-                    {stats.totalVotes}
+                    {stats?.totalVotes || 0}
                   </p>
                 </div>
               </div>
@@ -421,7 +445,7 @@ export default function SuperAdminDashboard() {
                       Database Size
                     </span>
                     <span className="text-sm font-semibold text-gray-900">
-                      {stats.databaseSize}
+                      {stats?.databaseSize || 'N/A'}
                     </span>
                   </div>
                   <div className="flex justify-between items-center mt-2">
@@ -430,10 +454,10 @@ export default function SuperAdminDashboard() {
                     </span>
                     <span
                       className={`text-sm font-semibold ${getHealthColor(
-                        stats.systemHealth
+                        stats?.systemHealth || 0
                       )}`}
                     >
-                      {stats.systemHealth}%
+                      {stats?.systemHealth || 0}%
                     </span>
                   </div>
                 </div>

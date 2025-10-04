@@ -1,17 +1,14 @@
-// Temporary compatibility layer to make build pass
-export function createAdminClient() {
-  return {
-    from: () => ({
-      select: () => ({ data: [], error: null }),
-      insert: () => ({ data: [], error: null }),
-      update: () => ({ data: [], error: null }),
-      delete: () => ({ data: [], error: null }),
-      eq: function() { return this; },
-      single: () => ({ data: null, error: null })
-    })
-  };
-}
+import { createClient } from '@supabase/supabase-js';
 
-export function createRouteHandlerClient() {
-  return createAdminClient();
-}
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
+// Public client for client-side operations
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+// Admin client for server-side operations
+export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+
+// Function to create admin client (for backward compatibility)
+export const createAdminClient = () => supabaseAdmin;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase";
+import { getDatabase } from "@/lib/database";
 import { verifyJWT } from "@/lib/auth";
 
 export async function GET(
@@ -16,33 +16,48 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const supabase = createAdminClient();
+    const db = getDatabase();
+    if (!db) {
+      return NextResponse.json(
+        { error: "Database connection failed" },
+        { status: 500 }
+      );
+    }
 
     // Get election details
-    const { data: electionData, error: electionError } = await supabase
-      .from("elections")
-      .select(
-        `
-        election_id,
-        election_name,
-        description,
-        status,
-        start_date,
-        end_date
-      `
-      )
-      .eq("election_id", electionId)
-      .single();
+    const electionResult = await db.query(
+      `SELECT election_id, election_name, description, status, start_date, end_date, creator
+       FROM elections WHERE election_id = $1`,
+      [electionId]
+    );
 
-    if (electionError || !electionData) {
+    if (!electionResult.rows || electionResult.rows.length === 0) {
       return NextResponse.json(
         { error: "Election not found" },
         { status: 404 }
       );
     }
 
+    const electionData = electionResult.rows[0];
+
+    // Check if results should be visible (election ended or user is admin)
+    const currentTime = new Date();
+    const endDate = new Date(electionData.end_date);
+    const isElectionEnded = currentTime > endDate;
+    
+    // Check if user is admin
+    const userRoles = await db.getUserRoles(authUser.userId);
+    const isAdmin = userRoles.some(role => ['Admin', 'SuperAdmin'].includes(role));
+    
+    if (!isElectionEnded && !isAdmin) {
+      return NextResponse.json(
+        { error: "Results not available yet" },
+        { status: 403 }
+      );
+    }
+
     // Only show results if election is completed (simplified access control)
-    if (electionData.status !== "Completed") {
+    if (electionData.status !== "Completed" && !isAdmin) {
       return NextResponse.json(
         {
           error: "Results are not available until the election is completed",
@@ -52,16 +67,25 @@ export async function GET(
     }
 
     // Get total eligible voters
-    const { count: totalEligibleVoters } = await supabase
-      .from("election_eligibility")
-      .select("*", { count: "exact" })
-      .eq("election_id", electionId);
+    let totalEligibleVoters = 0;
+    try {
+      const eligibleResult = await db.query(
+        `SELECT COUNT(*) as total FROM election_eligibility WHERE election_id = $1`,
+        [electionId]
+      );
+      totalEligibleVoters = parseInt(eligibleResult.rows[0]?.total || '0');
+    } catch (error) {
+      console.log("Election eligibility table may not exist, using total users");
+      const usersResult = await db.query(`SELECT COUNT(*) as total FROM users`);
+      totalEligibleVoters = parseInt(usersResult.rows[0]?.total || '0');
+    }
 
     // Get total votes cast
-    const { count: totalVotesCast } = await supabase
-      .from("votes")
-      .select("*", { count: "exact" })
-      .eq("election_id", electionId);
+    const votesCastResult = await db.query(
+      `SELECT COUNT(DISTINCT user_id) as total FROM votes WHERE election_id = $1`,
+      [electionId]
+    );
+    const totalVotesCast = parseInt(votesCastResult.rows[0]?.total || '0');
 
     // Calculate turnout percentage
     const turnoutPercentage =
@@ -70,46 +94,44 @@ export async function GET(
         : 0;
 
     // Get contests for this election
-    const { data: contestsData, error: contestsError } = await supabase
-      .from("contests")
-      .select(
-        `
-        id,
-        title,
-        description,
-        contest_type,
-        max_selections
-      `
-      )
-      .eq("election_id", electionId)
-      .order("display_order", { ascending: true });
+    const contestsResult = await db.query(
+      `SELECT contest_id as id, contest_title as title, description, contest_type, max_selections
+       FROM contests WHERE election_id = $1 ORDER BY display_order ASC`,
+      [electionId]
+    );
 
-    if (contestsError) {
-      console.error("Error fetching contests:", contestsError);
+    if (!contestsResult.rows) {
+      console.error("Error fetching contests");
       return NextResponse.json(
         { error: "Failed to fetch contests" },
         { status: 500 }
       );
     }
 
+    const contestsData = contestsResult.rows;
+
     // Get results for each contest
     const contests = await Promise.all(
       (contestsData || []).map(async (contest: any) => {
         // Get candidates for this contest
-        const { data: candidatesData } = await supabase
-          .from("candidates")
-          .select("id, name, party, description")
-          .eq("contest_id", contest.id)
-          .order("display_order", { ascending: true });
+        const candidatesResult = await db.query(
+          `SELECT candidate_id as id, candidate_name as name, party, description
+           FROM candidates WHERE contest_id = $1 ORDER BY display_order ASC`,
+          [contest.id]
+        );
+        const candidatesData = candidatesResult.rows;
 
         // Get vote counts for each candidate
         const candidateResults = await Promise.all(
           (candidatesData || []).map(async (candidate: any) => {
-            const { count: votes } = await supabase
-              .from("ballot_selections")
-              .select("*, votes!inner(*)", { count: "exact" })
-              .eq("candidate_id", candidate.id)
-              .eq("votes.election_id", electionId);
+            const votesResult = await db.query(
+              `SELECT COUNT(*) as count 
+               FROM ballot_selections bs
+               JOIN votes v ON bs.vote_id = v.vote_id
+               WHERE bs.candidate_id = $1 AND v.election_id = $2`,
+              [candidate.id, electionId]
+            );
+            const votes = parseInt(votesResult.rows[0]?.count || '0');
 
             return {
               id: candidate.id,

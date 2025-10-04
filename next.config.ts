@@ -1,8 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Azure App Service configuration
-  output: 'standalone',
+  // Azure App Service configuration - disabled for local development
+  // output: 'standalone',
   
   // Optimize for production
   images: {
