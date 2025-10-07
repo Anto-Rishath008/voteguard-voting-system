@@ -11,92 +11,25 @@ export async function POST(request: NextRequest) {
       firstName, 
       lastName, 
       confirmPassword, 
-      role = "voter",
-      // Enhanced security data
-      phoneNumber,
-      aadhaarNumber,
-      collegeId,
-      instituteName,
-      securityQuestions = [],
-      fingerprintData,
-      referenceCode,
-      authorizedBy,
-      reason
+      role = "Voter",
     } = await request.json();
 
     // Basic validation
     if (!email || !password || !firstName || !lastName || !confirmPassword) {
       return NextResponse.json(
-        { error: "All fields are required" },
+        { error: "All basic fields are required" },
         { status: 400 }
       );
     }
 
-    // Validate role
-    const validRoles = ["voter", "admin", "super_admin"];
-    if (!validRoles.includes(role)) {
+    // Validate role - case insensitive, normalize to title case
+    const normalizedRole = role.charAt(0).toUpperCase() + role.slice(1).toLowerCase();
+    const validRoles = ["Voter", "Admin", "Superadmin"];
+    if (!validRoles.includes(normalizedRole)) {
       return NextResponse.json(
         { error: "Invalid role specified" },
         { status: 400 }
       );
-    }
-
-    // Enhanced security validation - OPTIONAL for simplified registration
-    // When phoneNumber or aadhaarNumber is provided, validate them
-    // But don't require them for basic registration (Steps 2-5 are under construction)
-    
-    // Role-specific additional validation - only if enhanced data is provided
-    if (role !== "voter" && (collegeId || instituteName)) {
-      if (!collegeId || !instituteName) {
-        return NextResponse.json(
-          { error: "Admin roles require both college ID and institution name" },
-          { status: 400 }
-        );
-      }
-    }
-
-    // Security questions validation - only if provided
-    if (securityQuestions && securityQuestions.length > 0) {
-      const requiredQuestions = role === "voter" ? 2 : role === "admin" ? 2 : 3;
-      if (securityQuestions.length < requiredQuestions) {
-        return NextResponse.json(
-          { error: `Enhanced security requires ${requiredQuestions} security question(s) for ${role.replace('_', ' ')} role` },
-          { status: 400 }
-        );
-      }
-    }
-
-    // Super admin specific validation - only if all super_admin fields are provided
-    // For simplified registration, these fields are optional (Steps 2-5 under construction)
-    if (role === "super_admin" && (referenceCode || authorizedBy || reason)) {
-      if (!referenceCode || !authorizedBy || !reason) {
-        return NextResponse.json(
-          { error: "If providing super admin authorization, all fields (reference code, authorizer, and reason) are required" },
-          { status: 400 }
-        );
-      }
-    }
-
-    // Phone number validation - only if provided
-    if (phoneNumber) {
-      const phoneRegex = /^\+\d{10,15}$/;
-      if (!phoneRegex.test(phoneNumber)) {
-        return NextResponse.json(
-          { error: "Invalid phone number format. Use international format (+1234567890)" },
-          { status: 400 }
-        );
-      }
-    }
-
-    // Aadhaar validation - only if provided
-    if (aadhaarNumber) {
-      const aadhaarRegex = /^\d{4}\s?\d{4}\s?\d{4}$/;
-      if (!aadhaarRegex.test(aadhaarNumber.replace(/\s/g, ''))) {
-        return NextResponse.json(
-          { error: "Invalid Aadhaar number format" },
-          { status: 400 }
-        );
-      }
     }
 
     if (password !== confirmPassword) {
@@ -167,12 +100,7 @@ export async function POST(request: NextRequest) {
       created_at: new Date().toISOString(),
     };
 
-    // Add additional data if columns exist (will be ignored if they don't)
-    if (phoneNumber) userData.phone_number = phoneNumber;
-    if (aadhaarNumber) userData.aadhaar_number = aadhaarNumber.replace(/\s/g, '');
-    if (collegeId) userData.college_id = collegeId;
-    if (instituteName) userData.institute_name = instituteName;
-
+    // Simplified registration - no advanced fields required
     try {
       const userResult = await db.query(
         `INSERT INTO users (user_id, email, first_name, last_name, status, password_hash, created_at)
@@ -197,23 +125,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Note: Advanced security features (security questions, biometric data) 
-    // will be implemented when corresponding database tables are created
-
-    // Assign role to user using simplified approach
-    const roleMap: { [key: string]: string } = {
-      voter: "Voter",
-      admin: "Admin", 
-      super_admin: "SuperAdmin"
-    };
-
-    const roleName = roleMap[role];
-    
+    // Assign role to user
     try {
       // Assign role to user (using simplified table structure)
       await db.query(
         "INSERT INTO user_roles (user_id, role_name, created_at) VALUES ($1, $2, $3)",
-        [userId, roleName, new Date().toISOString()]
+        [userId, normalizedRole, new Date().toISOString()]
       );
     } catch (roleError) {
       console.error("Error assigning role:", roleError);
@@ -225,41 +142,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Log user registration (simplified for now)
-    console.log(`User registered successfully: ${email.toLowerCase()} with role: ${role}`);
-
-    // Determine next steps based on role
-    const nextSteps = [];
-    if (role === "super_admin") {
-      nextSteps.push("Your super admin request is pending approval");
-      nextSteps.push("You will receive an email once approved");
-    }
-    if (!phoneNumber) {
-      nextSteps.push("Complete phone verification in your profile");
-    }
-    nextSteps.push("Verify your email address to activate your account");
+    // Log user registration
+    console.log(`User registered successfully: ${email.toLowerCase()} with role: ${normalizedRole}`);
 
     return NextResponse.json(
       {
-        message: "Enhanced user registration completed successfully",
+        message: "User registration completed successfully",
         user: {
           id: userId,
           email: email.toLowerCase(),
           firstName: firstName.trim(),
           lastName: lastName.trim(),
-          role,
-          securityLevel: role === "voter" ? "Basic" : role === "admin" ? "Enhanced" : "Maximum",
+          role: normalizedRole,
           emailVerified: false,
-          phoneVerified: !!phoneNumber,
-          requiresApproval: role === "super_admin",
         },
-        nextSteps,
-        securityFeatures: {
-          securityQuestions: securityQuestions.length,
-          biometricEnabled: !!fingerprintData,
-          multiFactorAuth: true,
-          identityVerified: !!(aadhaarNumber || collegeId),
-        }
+        success: true
       },
       { status: 201 }
     );

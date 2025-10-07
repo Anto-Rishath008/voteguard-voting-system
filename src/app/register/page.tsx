@@ -1,375 +1,83 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useAuth, type EnhancedRegistrationData } from "@/contexts/AuthContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card, CardContent } from "@/components/ui/Card";
-import { Alert } from "@/components/ui/Modal";
 import { 
-  Vote, Mail, Lock, User, Shield, UserCheck, 
-  Phone, CreditCard, Fingerprint, FileText, 
-  CheckCircle, ArrowRight, ArrowLeft, Eye, 
-  Smartphone, IdCard, University, AlertTriangle,
-  Send, RefreshCw, Construction
+  Vote, Mail, Lock, User, Shield, 
+  Eye, EyeOff, Construction, Info
 } from "lucide-react";
 
-// Security Questions Bank
-const SECURITY_QUESTIONS = [
-  "What was the name of your first pet?",
-  "In which city were you born?",
-  "What is your mother's maiden name?",
-  "What was the name of your first school?",
-  "What is your favorite movie?",
-  "What was the model of your first car?",
-  "What is your favorite food?",
-  "What is the name of your best friend from childhood?",
-  "In which year did you graduate from college?",
-  "What is your favorite book?"
-];
-
 export default function RegisterPage() {
-  const [currentStep, setCurrentStep] = useState(1);
   const [formData, setFormData] = useState({
-    // Basic Info
     firstName: "",
     lastName: "",
     email: "",
     password: "",
     confirmPassword: "",
-    role: "voter",
-    
-    // Contact & Verification
-    phoneNumber: "",
-    emailOtp: "",
-    phoneOtp: "",
-    
-    // ID Verification
-    aadhaarNumber: "",
-    collegeId: "",
-    instituteName: "",
-    
-    // Security Questions (role-based)
-    securityQuestions: [
-      { question: "", answer: "" },
-      { question: "", answer: "" },
-      { question: "", answer: "" }
-    ],
-    
-    // Biometric (for Admin/SuperAdmin)
-    fingerprintData: null as string | null,
-    faceData: null as string | null,
-    
-    // Additional Security (SuperAdmin)
-    referenceCode: "",
-    authorizedBy: "",
-    reason: "",
-    
-    // Terms Agreement
-    agreedToTerms: false
+    role: "Voter",
   });
   
-  const [stepValidation, setStepValidation] = useState({
-    1: false, 2: false, 3: false, 4: false, 5: false
-  });
-  
-  const [otpStates, setOtpStates] = useState({
-    emailSent: false,
-    phoneSent: false,
-    emailVerified: false,
-    phoneVerified: false,
-    emailLoading: false,
-    phoneLoading: false
-  });
-  
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [fingerprintSupported, setFingerprintSupported] = useState(false);
 
-  const { signUp, signUpEnhanced } = useAuth();
+  const { signUp } = useAuth();
   const router = useRouter();
 
-  // Check biometric support
-  useEffect(() => {
-    if (typeof window !== 'undefined' && 'PublicKeyCredential' in window) {
-      setFingerprintSupported(true);
-    }
-  }, []);
-
-  // Get security requirements based on role - ALL USERS NOW REQUIRE ENHANCED SECURITY
-  const getSecurityLevel = () => {
-    switch(formData.role) {
-      case 'voter':
-        return {
-          steps: 5,
-          requiresFingerprint: true,
-          securityQuestions: 2,
-          requiresReference: false,
-          verificationLevel: 'Enhanced'
-        };
-      case 'admin':
-        return {
-          steps: 5,
-          requiresFingerprint: true,
-          securityQuestions: 2,
-          requiresReference: false,
-          verificationLevel: 'Enhanced'
-        };
-      case 'super_admin':
-        return {
-          steps: 5,
-          requiresFingerprint: true,
-          securityQuestions: 3,
-          requiresReference: true,
-          verificationLevel: 'Maximum'
-        };
-      default:
-        return {
-          steps: 5,
-          requiresFingerprint: true,
-          securityQuestions: 2,
-          requiresReference: false,
-          verificationLevel: 'Enhanced'
-        };
-    }
-  };
-
-  const securityLevel = getSecurityLevel();
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({
+    setFormData(prev => ({
       ...prev,
-      [name]: value,
+      [name]: value
     }));
-    
-    // Reset step validation when role changes
-    if (name === 'role') {
-      setStepValidation({ 1: false, 2: false, 3: false, 4: false, 5: false });
-      setCurrentStep(1);
-    }
-  };
-
-  const handleSecurityQuestionChange = (index: number, field: string, value: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      securityQuestions: prev.securityQuestions.map((q, i) => 
-        i === index ? { ...q, [field]: value } : q
-      )
-    }));
-  };
-
-  const validateStep = (step: number): boolean => {
-    switch(step) {
-      case 1:
-        return !!(formData.firstName && formData.lastName && formData.email && 
-                 formData.password && formData.confirmPassword && formData.role &&
-                 formData.password === formData.confirmPassword && formData.password.length >= 8);
-      case 2:
-        return !!(formData.phoneNumber && otpStates.emailVerified && otpStates.phoneVerified);
-      case 3:
-        // ALL users now require Aadhaar verification
-        if (!formData.aadhaarNumber) return false;
-        // Admin/SuperAdmin also need college ID and institution
-        const idValid = formData.role === 'voter' ? 
-          !!(formData.aadhaarNumber) :
-          !!(formData.aadhaarNumber && formData.collegeId && formData.instituteName);
-        return idValid;
-      case 4:
-        const requiredQuestions = securityLevel.securityQuestions;
-        const answeredQuestions = formData.securityQuestions.slice(0, requiredQuestions)
-          .filter(q => q.question && q.answer.length >= 3);
-        return answeredQuestions.length === requiredQuestions;
-      case 5:
-        // All users now require fingerprint (or acknowledge if not supported)
-        const hasFingerprint = !!(formData.fingerprintData || !fingerprintSupported);
-        if (formData.role === 'super_admin') {
-          return hasFingerprint && !!(formData.referenceCode && formData.authorizedBy && formData.reason);
-        }
-        return hasFingerprint;
-      default:
-        return false;
-    }
-  };
-
-  const sendEmailOTP = async () => {
-    setOtpStates(prev => ({ ...prev, emailLoading: true }));
-    setError("");
-    
-    try {
-      const response = await fetch('/api/auth/send-otp', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: formData.email,
-          type: 'email'
-        }),
-      });
-
-      const data = await response.json();
-      
-      if (response.ok) {
-        setOtpStates(prev => ({ ...prev, emailSent: true, emailLoading: false }));
-        
-        // Show development OTP in non-production
-        if (data.devOtp) {
-          setError(`Development Mode: Use OTP ${data.devOtp} (expires in 5 minutes)`);
-        }
-      } else {
-        throw new Error(data.error || 'Failed to send email OTP');
-      }
-    } catch (error: any) {
-      setError(error.message || "Failed to send email OTP");
-      setOtpStates(prev => ({ ...prev, emailLoading: false }));
-    }
-  };
-
-  const sendPhoneOTP = async () => {
-    setOtpStates(prev => ({ ...prev, phoneLoading: true }));
-    setError("");
-    
-    try {
-      const response = await fetch('/api/auth/send-otp', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: formData.phoneNumber, // Using phone number in email field for this API
-          type: 'phone'
-        }),
-      });
-
-      const data = await response.json();
-      
-      if (response.ok) {
-        setOtpStates(prev => ({ ...prev, phoneSent: true, phoneLoading: false }));
-        
-        // Show development OTP in non-production
-        if (data.devOtp) {
-          setError(`Development Mode: Use OTP ${data.devOtp} (expires in 5 minutes)`);
-        }
-      } else {
-        throw new Error(data.error || 'Failed to send SMS OTP');
-      }
-    } catch (error: any) {
-      setError(error.message || "Failed to send SMS OTP");
-      setOtpStates(prev => ({ ...prev, phoneLoading: false }));
-    }
-  };
-
-  const verifyEmailOTP = async () => {
-    if (!formData.emailOtp) {
-      setError("Please enter the OTP");
-      return;
-    }
-
-    try {
-      const response = await fetch('/api/auth/verify-otp', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: formData.email,
-          otp: formData.emailOtp,
-          type: 'email'
-        }),
-      });
-
-      const data = await response.json();
-      
-      if (response.ok) {
-        setOtpStates(prev => ({ ...prev, emailVerified: true }));
-        setError(""); // Clear any errors
-      } else {
-        throw new Error(data.error || 'Invalid email OTP');
-      }
-    } catch (error: any) {
-      setError(error.message || "Invalid email OTP");
-    }
-  };
-
-  const verifyPhoneOTP = async () => {
-    if (!formData.phoneOtp) {
-      setError("Please enter the SMS code");
-      return;
-    }
-
-    try {
-      const response = await fetch('/api/auth/verify-otp', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: formData.phoneNumber, // Using phone number in email field for this API
-          otp: formData.phoneOtp,
-          type: 'phone'
-        }),
-      });
-
-      const data = await response.json();
-      
-      if (response.ok) {
-        setOtpStates(prev => ({ ...prev, phoneVerified: true }));
-        setError(""); // Clear any errors
-      } else {
-        throw new Error(data.error || 'Invalid SMS code');
-      }
-    } catch (error: any) {
-      setError(error.message || "Invalid SMS code");
-    }
-  };
-
-  const handleFingerprintRegister = async () => {
-    if (!fingerprintSupported) {
-      setError("Fingerprint authentication not supported on this device");
-      return;
-    }
-    
-    try {
-      // Mock fingerprint registration
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      setFormData(prev => ({ ...prev, fingerprintData: "fingerprint_registered" }));
-    } catch (error) {
-      setError("Failed to register fingerprint");
-    }
-  };
-
-  const nextStep = () => {
-    if (validateStep(currentStep)) {
-      setStepValidation(prev => ({ ...prev, [currentStep]: true }));
-      // Since steps 2-5 are under construction, allow going to next step for preview only
-      setCurrentStep(prev => Math.min(prev + 1, securityLevel.steps));
-      setError("");
-    } else {
-      setError("Please complete all required fields for this step");
-    }
-  };
-
-  const prevStep = () => {
-    setCurrentStep(prev => Math.max(prev - 1, 1));
     setError("");
   };
 
-  const handleSubmit = async () => {
+  const validateForm = () => {
+    if (!formData.firstName.trim()) {
+      setError("First name is required");
+      return false;
+    }
+    if (!formData.lastName.trim()) {
+      setError("Last name is required");
+      return false;
+    }
+    if (!formData.email.trim()) {
+      setError("Email is required");
+      return false;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+      setError("Please enter a valid email address");
+      return false;
+    }
+    if (formData.password.length < 6) {
+      setError("Password must be at least 6 characters long");
+      return false;
+    }
+    if (formData.password !== formData.confirmPassword) {
+      setError("Passwords do not match");
+      return false;
+    }
+    return true;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!validateForm()) {
+      return;
+    }
+
     setLoading(true);
     setError("");
 
-    // For simplified registration, only validate Step 1
-    if (!validateStep(1)) {
-      setError("Please complete all required fields in Step 1");
-      setLoading(false);
-      return;
-    }
-
     try {
-      // Use simple registration for now (only Step 1 data)
       const result = await signUp(
         formData.email,
         formData.password,
@@ -380,772 +88,292 @@ export default function RegisterPage() {
       );
 
       if (result.error) {
-        throw new Error(result.error);
+        setError(result.error);
+      } else {
+        // Registration successful
+        router.push("/login?registered=true");
       }
-
-      // Redirect to dashboard after successful registration
-      router.push("/dashboard");
-    } catch (err: any) {
-      setError(err.message || "Registration failed");
+    } catch (err) {
+      setError("An unexpected error occurred. Please try again.");
+      console.error("Registration error:", err);
     } finally {
       setLoading(false);
     }
   };
 
-  // Render step indicator with blur effect for steps 2-5
-  const renderStepIndicator = () => (
-    <div className="flex justify-center mb-8">
-      <div className="flex items-center space-x-4">
-        {Array.from({ length: securityLevel.steps }, (_, i) => {
-          const stepNum = i + 1;
-          const isActive = stepNum === currentStep;
-          const isCompleted = stepValidation[stepNum as keyof typeof stepValidation];
-          const isUnderConstruction = stepNum > 1; // Steps 2-5 are under construction
-          
-          return (
-            <div key={stepNum} className="flex items-center">
-              <div className={`
-                w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold
-                ${isUnderConstruction ? 'bg-gray-300 text-gray-500 blur-sm' :
-                  isCompleted ? 'bg-green-500 text-white' : 
-                  isActive ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-600'}
-              `}>
-                {isCompleted ? <CheckCircle className="w-5 h-5" /> : stepNum}
-              </div>
-              {stepNum < securityLevel.steps && (
-                <div className={`w-12 h-1 ${isUnderConstruction ? 'bg-gray-300 blur-sm' : isCompleted ? 'bg-green-500' : 'bg-gray-200'}`} />
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-
-  // Step content renderers
-  const renderStep1 = () => (
-    <div className="space-y-6">
-      <div className="text-center mb-6">
-        <h3 className="text-xl font-semibold text-gray-900">Basic Information</h3>
-        <p className="text-sm text-gray-600">Let's start with your basic details</p>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <Input
-          label="First Name"
-          name="firstName"
-          type="text"
-          value={formData.firstName}
-          onChange={handleChange}
-          required
-          leftIcon={<User className="h-5 w-5" />}
-          placeholder="First name"
-        />
-        <Input
-          label="Last Name"
-          name="lastName"
-          type="text"
-          value={formData.lastName}
-          onChange={handleChange}
-          required
-          leftIcon={<User className="h-5 w-5" />}
-          placeholder="Last name"
-        />
-      </div>
-
-      <Input
-        label="Email address"
-        name="email"
-        type="email"
-        value={formData.email}
-        onChange={handleChange}
-        required
-        leftIcon={<Mail className="h-5 w-5" />}
-        placeholder="Enter your email"
-      />
-
-      <Input
-        label="Password"
-        name="password"
-        type="password"
-        value={formData.password}
-        onChange={handleChange}
-        required
-        leftIcon={<Lock className="h-5 w-5" />}
-        placeholder="Choose a password"
-        helpText="Must be at least 8 characters long"
-      />
-
-      <Input
-        label="Confirm Password"
-        name="confirmPassword"
-        type="password"
-        value={formData.confirmPassword}
-        onChange={handleChange}
-        required
-        leftIcon={<Lock className="h-5 w-5" />}
-        placeholder="Confirm your password"
-      />
-
-      {/* Role Selection with Security Level Display */}
-      <div className="space-y-3">
-        <label className="block text-sm font-medium text-gray-700">
-          Account Type & Security Level
-        </label>
-        <div className="space-y-3">
-          {(['voter', 'admin', 'super_admin'] as const).map((role) => {
-            const roleConfig = {
-              voter: { 
-                icon: <UserCheck className="h-5 w-5" />, 
-                title: "Voter", 
-                desc: "Can participate in elections",
-                security: "Enhanced Security: Email + Phone + Aadhaar + Fingerprint + 2 Security Questions",
-                color: "blue"
-              },
-              admin: { 
-                icon: <Shield className="h-5 w-5" />, 
-                title: "Admin", 
-                desc: "Can manage elections and users",
-                security: "Enhanced Security: All Voter requirements + Institution Verification",
-                color: "orange"
-              },
-              super_admin: { 
-                icon: <Shield className="h-5 w-5" />, 
-                title: "Super Admin", 
-                desc: "Full system access",
-                security: "Maximum Security: All Admin requirements + Reference Code + 3 Security Questions",
-                color: "red"
-              }
-            };
-            
-            const config = roleConfig[role];
-            const isSelected = formData.role === role;
-            
-            return (
-              <div
-                key={role}
-                className={`
-                  border-2 rounded-lg p-4 cursor-pointer transition-all
-                  ${isSelected ? 
-                    `border-${config.color}-500 bg-${config.color}-50` : 
-                    'border-gray-200 hover:border-gray-300'
-                  }
-                `}
-                onClick={() => handleChange({ target: { name: 'role', value: role } } as any)}
-              >
-                <div className="flex items-start space-x-3">
-                  <div className={`mt-1 ${isSelected ? `text-${config.color}-600` : 'text-gray-400'}`}>
-                    {config.icon}
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-2">
-                      <h4 className="font-medium text-gray-900">{config.title}</h4>
-                      {isSelected && <CheckCircle className="h-4 w-4 text-green-500" />}
-                    </div>
-                    <p className="text-sm text-gray-600 mt-1">{config.desc}</p>
-                    <p className="text-xs text-gray-500 mt-2 font-medium">{config.security}</p>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-
-  // Under Construction Component for Steps 2-5
-  const renderUnderConstruction = (stepNumber: number) => {
-    const stepTitles: { [key: number]: string } = {
-      2: "Contact Verification",
-      3: "ID Verification",
-      4: "Security Questions",
-      5: "Biometric & Final Setup"
-    };
-
-    return (
-      <div className="space-y-6">
-        <div className="text-center mb-8 blur-sm pointer-events-none select-none">
-          <h3 className="text-xl font-semibold text-gray-400 mb-2">
-            Step {stepNumber}: {stepTitles[stepNumber]}
-          </h3>
-          <p className="text-gray-400">Enhanced security verification</p>
-        </div>
-
-        <div className="relative">
-          {/* Blurred preview content */}
-          <div className="blur-md pointer-events-none select-none opacity-40 space-y-4">
-            <div className="bg-gray-100 h-12 rounded"></div>
-            <div className="bg-gray-100 h-12 rounded"></div>
-            <div className="bg-gray-100 h-24 rounded"></div>
-          </div>
-
-          {/* Under Construction Overlay */}
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/90 backdrop-blur-sm">
-            <Construction className="w-16 h-16 text-yellow-500 mb-4 animate-pulse" />
-            <h3 className="text-2xl font-bold text-gray-700 mb-2">Under Construction</h3>
-            <p className="text-gray-600 text-center max-w-md mb-4">
-              This enhanced security feature is currently under development.
-            </p>
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 max-w-md">
-              <p className="text-sm text-yellow-800 text-center">
-                <strong>Coming Soon:</strong> {stepTitles[stepNumber]} will add an extra layer of security to your account
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Informational message */}
-        <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <p className="text-sm text-blue-800 text-center">
-            <strong>Note:</strong> For now, you can complete registration with basic information from Step 1
-          </p>
-        </div>
-      </div>
-    );
-  };
-
-  const renderStep2 = () => (
-    <div className="space-y-6">
-      <div className="text-center mb-6">
-        <h3 className="text-xl font-semibold text-gray-900">Contact Verification</h3>
-        <p className="text-sm text-gray-600">Verify your phone number and email address</p>
-      </div>
-
-      <Input
-        label="Phone Number"
-        name="phoneNumber"
-        type="tel"
-        value={formData.phoneNumber}
-        onChange={handleChange}
-        required
-        leftIcon={<Phone className="h-5 w-5" />}
-        placeholder="+91 9876543210"
-        helpText="Include country code"
-      />
-
-      {/* Email OTP */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <label className="text-sm font-medium text-gray-700">Email Verification</label>
-          {!otpStates.emailSent && (
-            <Button 
-              onClick={sendEmailOTP} 
-              size="sm" 
-              variant="outline"
-              isLoading={otpStates.emailLoading}
-              disabled={!formData.email}
-            >
-              <Send className="h-4 w-4 mr-1" />
-              Send OTP
-            </Button>
-          )}
-        </div>
-        
-        {otpStates.emailSent && !otpStates.emailVerified && (
-          <div className="flex space-x-2">
-            <Input
-              name="emailOtp"
-              placeholder="Enter 6-digit OTP"
-              value={formData.emailOtp}
-              onChange={handleChange}
-              maxLength={6}
-            />
-            <Button onClick={verifyEmailOTP} size="sm">
-              Verify
-            </Button>
-          </div>
-        )}
-        
-        {otpStates.emailVerified && (
-          <div className="flex items-center text-green-600 text-sm">
-            <CheckCircle className="h-4 w-4 mr-1" />
-            Email verified successfully
-          </div>
-        )}
-      </div>
-
-      {/* Phone OTP */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <label className="text-sm font-medium text-gray-700">Phone Verification</label>
-          {!otpStates.phoneSent && (
-            <Button 
-              onClick={sendPhoneOTP} 
-              size="sm" 
-              variant="outline"
-              isLoading={otpStates.phoneLoading}
-              disabled={!formData.phoneNumber}
-            >
-              <Smartphone className="h-4 w-4 mr-1" />
-              Send SMS
-            </Button>
-          )}
-        </div>
-        
-        {otpStates.phoneSent && !otpStates.phoneVerified && (
-          <div className="flex space-x-2">
-            <Input
-              name="phoneOtp"
-              placeholder="Enter 6-digit SMS code"
-              value={formData.phoneOtp}
-              onChange={handleChange}
-              maxLength={6}
-            />
-            <Button onClick={verifyPhoneOTP} size="sm">
-              Verify
-            </Button>
-          </div>
-        )}
-        
-        {otpStates.phoneVerified && (
-          <div className="flex items-center text-green-600 text-sm">
-            <CheckCircle className="h-4 w-4 mr-1" />
-            Phone verified successfully
-          </div>
-        )}
-      </div>
-
-      <div className="bg-blue-50 p-4 rounded-lg">
-        <div className="flex items-start space-x-2">
-          <AlertTriangle className="h-5 w-5 text-blue-600 mt-0.5" />
-          <div className="text-sm text-blue-800">
-            <p className="font-medium">Real OTP Verification Required</p>
-            <p>You will receive a 6-digit code via email and SMS. Both verifications are mandatory for account security.</p>
-            <p className="mt-1 text-xs text-blue-700">
-              📧 Email OTP expires in 5 minutes | 📱 SMS OTP expires in 5 minutes
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderStep3 = () => (
-    <div className="space-y-6">
-      <div className="text-center mb-6">
-        <h3 className="text-xl font-semibold text-gray-900">Identity Verification</h3>
-        <p className="text-sm text-gray-600">Provide your identification details</p>
-      </div>
-
-      {/* Aadhaar Number - NOW MANDATORY FOR ALL USERS */}
-      <Input
-        label="Aadhaar Number (Required for All Users)"
-        name="aadhaarNumber"
-        type="text"
-        value={formData.aadhaarNumber}
-        onChange={handleChange}
-        required={true}
-        leftIcon={<IdCard className="h-5 w-5" />}
-        placeholder="1234 5678 9012"
-        helpText="12-digit unique identification number - Required for enhanced security"
-        maxLength={14}
-      />
-
-      {/* College/Institution ID */}
-      <Input
-        label={formData.role === 'voter' ? "College ID (Optional)" : "College/Institution ID"}
-        name="collegeId"
-        type="text"
-        value={formData.collegeId}
-        onChange={handleChange}
-        required={formData.role !== 'voter'}
-        leftIcon={<University className="h-5 w-5" />}
-        placeholder="Student/Employee ID"
-      />
-
-      {/* Institution Name (Required for Admin/SuperAdmin) */}
-      {formData.role !== 'voter' && (
-        <Input
-          label="Institution/College Name"
-          name="instituteName"
-          type="text"
-          value={formData.instituteName}
-          onChange={handleChange}
-          required
-          leftIcon={<University className="h-5 w-5" />}
-          placeholder="Full institution name"
-        />
-      )}
-
-      <div className="bg-yellow-50 p-4 rounded-lg">
-        <div className="flex items-start space-x-2">
-          <AlertTriangle className="h-5 w-5 text-yellow-600 mt-0.5" />
-          <div className="text-sm text-yellow-800">
-            <p className="font-medium">Identity Verification</p>
-            <p>
-              {formData.role === 'voter' 
-                ? "Provide at least one form of identification (Aadhaar or College ID)."
-                : "Both Aadhaar and institutional identification are required for admin roles."
-              }
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderStep4 = () => (
-    <div className="space-y-6">
-      <div className="text-center mb-6">
-        <h3 className="text-xl font-semibold text-gray-900">Security Questions</h3>
-        <p className="text-sm text-gray-600">
-          Answer {securityLevel.securityQuestions} security question{securityLevel.securityQuestions > 1 ? 's' : ''} for account recovery
-        </p>
-      </div>
-
-      {Array.from({ length: securityLevel.securityQuestions }, (_, index) => (
-        <div key={index} className="space-y-3">
-          <label className="block text-sm font-medium text-gray-700">
-            Security Question {index + 1}
-          </label>
-          
-          <select
-            value={formData.securityQuestions[index]?.question || ''}
-            onChange={(e) => handleSecurityQuestionChange(index, 'question', e.target.value)}
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            required
-          >
-            <option value="">Select a security question</option>
-            {SECURITY_QUESTIONS.filter(q => 
-              !formData.securityQuestions.some((sq, i) => i !== index && sq.question === q)
-            ).map((question, qIndex) => (
-              <option key={qIndex} value={question}>
-                {question}
-              </option>
-            ))}
-          </select>
-
-          {formData.securityQuestions[index]?.question && (
-            <Input
-              label="Your Answer"
-              value={formData.securityQuestions[index]?.answer || ''}
-              onChange={(e) => handleSecurityQuestionChange(index, 'answer', e.target.value)}
-              placeholder="Enter your answer"
-              required
-              helpText="Minimum 3 characters"
-              minLength={3}
-            />
-          )}
-        </div>
-      ))}
-
-      <div className="bg-blue-50 p-4 rounded-lg">
-        <div className="flex items-start space-x-2">
-          <Shield className="h-5 w-5 text-blue-600 mt-0.5" />
-          <div className="text-sm text-blue-800">
-            <p className="font-medium">Security Guidelines</p>
-            <ul className="mt-1 list-disc list-inside space-y-1">
-              <li>Choose questions you'll remember easily</li>
-              <li>Provide honest and memorable answers</li>
-              <li>These will be used for account recovery</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderStep5 = () => (
-    <div className="space-y-6">
-      <div className="text-center mb-6">
-        <h3 className="text-xl font-semibold text-gray-900">
-          {formData.role === 'voter' ? 'Final Step' : 'Advanced Security'}
-        </h3>
-        <p className="text-sm text-gray-600">
-          {formData.role === 'voter' 
-            ? 'Review your information and create your account'
-            : 'Complete biometric registration and additional verification'
-          }
-        </p>
-      </div>
-
-      {/* Biometric Registration - NOW REQUIRED FOR ALL USERS */}
-      <div className="space-y-4">
-        <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-          <div className="flex items-start space-x-2 mb-3">
-            <Fingerprint className="h-6 w-6 text-blue-600 mt-0.5" />
-            <div>
-              <h4 className="font-medium text-blue-900">Enhanced Security: Biometric Registration</h4>
-              <p className="text-sm text-blue-800">All VoteGuard users now require fingerprint registration for maximum security</p>
-            </div>
-          </div>
-        </div>
-        
-        <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-          <div className="flex items-center space-x-3">
-            <Fingerprint className="h-6 w-6 text-blue-600" />
-            <div>
-              <h4 className="font-medium text-gray-900">Fingerprint Registration</h4>
-              <p className="text-sm text-gray-600">
-                {formData.role === 'voter' ? 'Required for secure voting access' : 
-                 formData.role === 'admin' ? 'Required for admin privileges' : 
-                 'Required for super admin access'}
-              </p>
-            </div>
-          </div>
-          <Button
-            onClick={handleFingerprintRegister}
-            variant={formData.fingerprintData ? "outline" : "primary"}
-            size="sm"
-            disabled={!fingerprintSupported}
-          >
-            {formData.fingerprintData ? (
-              <>
-                <CheckCircle className="h-4 w-4 mr-1 text-green-600" />
-                Registered
-              </>
-            ) : (
-              <>
-                <Fingerprint className="h-4 w-4 mr-1" />
-                Register Now
-              </>
-            )}
-          </Button>
-        </div>
-
-        {!fingerprintSupported && (
-          <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-            <div className="flex items-start space-x-2">
-              <AlertTriangle className="h-5 w-5 text-orange-600 mt-0.5" />
-              <div className="text-sm">
-                <p className="text-orange-800 font-medium">Fingerprint Not Available</p>
-                <p className="text-orange-700">
-                  Biometric authentication is not supported on this device. You can set this up later from your profile settings.
-                  For now, you can proceed with other security measures.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* SuperAdmin Reference Code */}
-      {formData.role === 'super_admin' && (
-        <div className="space-y-4">
-          <div className="bg-red-50 p-4 rounded-lg border border-red-200">
-            <div className="flex items-start space-x-2">
-              <AlertTriangle className="h-5 w-5 text-red-600 mt-0.5" />
-              <div className="text-sm text-red-800">
-                <p className="font-medium">Super Admin Verification Required</p>
-                <p>Super Admin accounts require additional verification and approval.</p>
-              </div>
-            </div>
-          </div>
-
-          <Input
-            label="Reference Code"
-            name="referenceCode"
-            type="text"
-            value={formData.referenceCode}
-            onChange={handleChange}
-            required
-            leftIcon={<CreditCard className="h-5 w-5" />}
-            placeholder="Authorization reference code"
-            helpText="Provided by system administrator"
-          />
-
-          <Input
-            label="Authorized By"
-            name="authorizedBy"
-            type="text"
-            value={formData.authorizedBy}
-            onChange={handleChange}
-            required
-            leftIcon={<User className="h-5 w-5" />}
-            placeholder="Name of authorizing person"
-          />
-
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-gray-700">
-              Reason for Super Admin Access
-            </label>
-            <textarea
-              name="reason"
-              value={formData.reason}
-              onChange={(e) => handleChange(e as any)}
-              required
-              rows={3}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="Explain why you need super admin access..."
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Summary for all roles */}
-      <div className="bg-gray-50 p-4 rounded-lg space-y-3">
-        <h4 className="font-medium text-gray-900">Registration Summary</h4>
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <span className="text-gray-600">Name:</span>
-            <span className="ml-2 font-medium">{formData.firstName} {formData.lastName}</span>
-          </div>
-          <div>
-            <span className="text-gray-600">Role:</span>
-            <span className="ml-2 font-medium capitalize">{formData.role.replace('_', ' ')}</span>
-          </div>
-          <div>
-            <span className="text-gray-600">Email:</span>
-            <span className="ml-2 font-medium">{formData.email}</span>
-          </div>
-          <div>
-            <span className="text-gray-600">Phone:</span>
-            <span className="ml-2 font-medium">{formData.phoneNumber}</span>
-          </div>
-        </div>
-        <div className="pt-2 border-t">
-          <span className="text-gray-600">Security Level:</span>
-          <span className="ml-2 font-medium text-blue-600">{securityLevel.verificationLevel}</span>
-        </div>
-      </div>
-    </div>
-  );
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-2xl mx-auto">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-6xl">
         {/* Header */}
         <div className="text-center mb-8">
-          <div className="flex justify-center">
-            <Vote className="h-12 w-12 text-blue-600" />
+          <div className="flex justify-center mb-4">
+            <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-4 rounded-2xl">
+              <Vote className="h-12 w-12 text-white" />
+            </div>
           </div>
-          <h2 className="mt-6 text-3xl font-bold text-gray-900">
-            Create your VoteGuard account
-          </h2>
-          <p className="mt-2 text-sm text-gray-600">
-            {formData.role && (
-              <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 mr-2">
-                {securityLevel.verificationLevel} Security Level
-              </span>
-            )}
-            Or{" "}
-            <Link
-              href="/login"
-              className="font-medium text-blue-600 hover:text-blue-500"
-            >
-              sign in to your existing account
-            </Link>
+          <h1 className="text-4xl font-bold text-gray-900 mb-2">
+            Create Your Account
+          </h1>
+          <p className="text-gray-600">
+            Join VoteGuard - Simplified Registration Process
           </p>
         </div>
 
-        {/* Step Indicator */}
-        {renderStepIndicator()}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Main Registration Form - Active */}
+          <div className="lg:col-span-2">
+            <Card className="shadow-xl border-2 border-blue-500">
+              <CardContent className="p-8">
+                <div className="mb-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-2xl font-bold text-gray-900">
+                      <span className="bg-blue-600 text-white px-3 py-1 rounded-lg mr-2">1</span>
+                      Basic Information
+                    </h2>
+                    <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-semibold">
+                      Active
+                    </span>
+                  </div>
+                  <p className="text-gray-600 text-sm">
+                    Quick and simple - just the essentials to get you started
+                  </p>
+                </div>
 
-        {/* Registration Form */}
-        <Card>
-          <CardContent className="p-8">
-            {error && (
-              <Alert type="error" className="mb-6">
-                {error}
-              </Alert>
-            )}
-
-            {/* Step Content */}
-            <div className="min-h-[400px]">
-              {currentStep === 1 && renderStep1()}
-              {currentStep === 2 && renderUnderConstruction(2)}
-              {currentStep === 3 && renderUnderConstruction(3)}
-              {currentStep === 4 && renderUnderConstruction(4)}
-              {currentStep === 5 && renderUnderConstruction(5)}
-            </div>
-
-            {/* Navigation Buttons */}
-            <div className="flex justify-between pt-6 border-t">
-              <Button
-                variant="outline"
-                onClick={prevStep}
-                disabled={currentStep === 1}
-                className="flex items-center"
-              >
-                <ArrowLeft className="h-4 w-4 mr-1" />
-                Previous
-              </Button>
-
-              {/* Show Register button on Step 1, and allow preview navigation for Steps 2-5 */}
-              {currentStep === 1 ? (
-                <div className="flex flex-col gap-2">
-                  {/* Validation hints */}
-                  {!validateStep(currentStep) && (
-                    <div className="text-xs text-gray-500 text-right">
-                      {!formData.firstName && "• First name required "}
-                      {!formData.lastName && "• Last name required "}
-                      {!formData.email && "• Email required "}
-                      {!formData.password && "• Password required "}
-                      {!formData.confirmPassword && "• Confirm password required "}
-                      {formData.password && formData.confirmPassword && formData.password !== formData.confirmPassword && "• Passwords must match "}
-                      {formData.password && formData.password.length < 8 && "• Password must be 8+ characters "}
-                      {!formData.role && "• Please select account type "}
+                <form onSubmit={handleSubmit} className="space-y-6">
+                  {/* Error Message */}
+                  {error && (
+                    <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded">
+                      <p className="text-red-700">{error}</p>
                     </div>
                   )}
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={nextStep}
-                      variant="outline"
-                      disabled={!validateStep(currentStep)}
-                      className="flex items-center"
+
+                  {/* Role Selection */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      <Shield className="inline h-4 w-4 mr-1" />
+                      Account Type
+                    </label>
+                    <select
+                      name="role"
+                      value={formData.role}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                      required
                     >
-                      Preview Next Steps
-                      <ArrowRight className="h-4 w-4 ml-1" />
-                    </Button>
-                    <Button
-                      onClick={handleSubmit}
-                      isLoading={loading}
-                      disabled={!validateStep(currentStep) || loading}
-                      className="flex items-center bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-                      title={!validateStep(currentStep) ? "Please fill all required fields" : "Create your account"}
-                    >
-                      <CheckCircle className="h-4 w-4 mr-1" />
-                      Create Account
-                    </Button>
+                      <option value="Voter">Voter</option>
+                      <option value="Admin">Admin</option>
+                      <option value="SuperAdmin">Super Admin</option>
+                    </select>
+                  </div>
+
+                  {/* Name Fields */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        <User className="inline h-4 w-4 mr-1" />
+                        First Name
+                      </label>
+                      <Input
+                        type="text"
+                        name="firstName"
+                        value={formData.firstName}
+                        onChange={handleInputChange}
+                        placeholder="John"
+                        required
+                        className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        <User className="inline h-4 w-4 mr-1" />
+                        Last Name
+                      </label>
+                      <Input
+                        type="text"
+                        name="lastName"
+                        value={formData.lastName}
+                        onChange={handleInputChange}
+                        placeholder="Doe"
+                        required
+                        className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Email */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      <Mail className="inline h-4 w-4 mr-1" />
+                      Email Address
+                    </label>
+                    <Input
+                      type="email"
+                      name="email"
+                      value={formData.email}
+                      onChange={handleInputChange}
+                      placeholder="john.doe@example.com"
+                      required
+                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                    />
+                  </div>
+
+                  {/* Password */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      <Lock className="inline h-4 w-4 mr-1" />
+                      Password
+                    </label>
+                    <div className="relative">
+                      <Input
+                        type={showPassword ? "text" : "password"}
+                        name="password"
+                        value={formData.password}
+                        onChange={handleInputChange}
+                        placeholder="Min. 6 characters"
+                        required
+                        className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition pr-12"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                      >
+                        {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Confirm Password */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      <Lock className="inline h-4 w-4 mr-1" />
+                      Confirm Password
+                    </label>
+                    <div className="relative">
+                      <Input
+                        type={showConfirmPassword ? "text" : "password"}
+                        name="confirmPassword"
+                        value={formData.confirmPassword}
+                        onChange={handleInputChange}
+                        placeholder="Re-enter your password"
+                        required
+                        className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition pr-12"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                      >
+                        {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Submit Button */}
+                  <Button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold py-4 rounded-lg transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading ? "Creating Account..." : "Create Account"}
+                  </Button>
+
+                  {/* Login Link */}
+                  <div className="text-center pt-4 border-t">
+                    <p className="text-gray-600">
+                      Already have an account?{" "}
+                      <Link href="/login" className="text-blue-600 hover:text-blue-700 font-semibold">
+                        Sign In
+                      </Link>
+                    </p>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Coming Soon Features - Blurred */}
+          <div className="space-y-4">
+            {/* Feature 2 - Blurred */}
+            <Card className="shadow-lg opacity-60 blur-sm hover:blur-none transition-all cursor-not-allowed">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-lg font-bold text-gray-700">
+                    <span className="bg-gray-400 text-white px-2 py-1 rounded mr-2">2</span>
+                    Verification
+                  </h3>
+                  <Construction className="h-5 w-5 text-orange-500" />
+                </div>
+                <p className="text-sm text-gray-600">
+                  Email & Phone verification coming soon
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* Feature 3 - Blurred */}
+            <Card className="shadow-lg opacity-60 blur-sm hover:blur-none transition-all cursor-not-allowed">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-lg font-bold text-gray-700">
+                    <span className="bg-gray-400 text-white px-2 py-1 rounded mr-2">3</span>
+                    ID Verification
+                  </h3>
+                  <Construction className="h-5 w-5 text-orange-500" />
+                </div>
+                <p className="text-sm text-gray-600">
+                  Aadhaar & Student ID verification
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* Feature 4 - Blurred */}
+            <Card className="shadow-lg opacity-60 blur-sm hover:blur-none transition-all cursor-not-allowed">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-lg font-bold text-gray-700">
+                    <span className="bg-gray-400 text-white px-2 py-1 rounded mr-2">4</span>
+                    Security
+                  </h3>
+                  <Construction className="h-5 w-5 text-orange-500" />
+                </div>
+                <p className="text-sm text-gray-600">
+                  Security questions & biometric auth
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* Feature 5 - Blurred */}
+            <Card className="shadow-lg opacity-60 blur-sm hover:blur-none transition-all cursor-not-allowed">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-lg font-bold text-gray-700">
+                    <span className="bg-gray-400 text-white px-2 py-1 rounded mr-2">5</span>
+                    Final Review
+                  </h3>
+                  <Construction className="h-5 w-5 text-orange-500" />
+                </div>
+                <p className="text-sm text-gray-600">
+                  Review & confirm registration
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* Info Box */}
+            <Card className="shadow-lg bg-blue-50 border-blue-200">
+              <CardContent className="p-4">
+                <div className="flex items-start space-x-3">
+                  <Info className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-semibold text-blue-900 mb-1">Coming Soon</h4>
+                    <p className="text-sm text-blue-700">
+                      Advanced security features are under development. For now, you can register with just basic information.
+                    </p>
                   </div>
                 </div>
-              ) : currentStep < securityLevel.steps ? (
-                <Button
-                  onClick={nextStep}
-                  className="flex items-center"
-                >
-                  Preview Next
-                  <ArrowRight className="h-4 w-4 ml-1" />
-                </Button>
-              ) : (
-                <Button
-                  onClick={() => setCurrentStep(1)}
-                  className="flex items-center bg-blue-600 hover:bg-blue-700"
-                >
-                  Back to Registration
-                  <ArrowLeft className="h-4 w-4 ml-1" />
-                </Button>
-              )}
-            </div>
-
-            <div className="mt-6 text-center text-sm text-gray-600">
-              By creating an account, you agree to our{" "}
-              <Link
-                href="/terms"
-                className="font-medium text-blue-600 hover:text-blue-500"
-              >
-                Terms of Service
-              </Link>{" "}
-              and{" "}
-              <Link
-                href="/privacy"
-                className="font-medium text-blue-600 hover:text-blue-500"
-              >
-                Privacy Policy
-              </Link>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Footer */}
-        <div className="text-center text-sm text-gray-600">
-          <Link
-            href="/"
-            className="font-medium text-blue-600 hover:text-blue-500"
-          >
-            ← Back to home
-          </Link>
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
     </div>
