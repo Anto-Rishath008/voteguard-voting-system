@@ -11,26 +11,38 @@ export async function POST(request: NextRequest) {
       firstName, 
       lastName, 
       confirmPassword, 
-      role = "Voter",
+      role = "voter",
+      // Optional enhanced security data (for future use)
+      phoneNumber,
+      aadhaarNumber,
+      collegeId,
+      instituteName,
+      securityQuestions = [],
+      fingerprintData,
+      referenceCode,
+      authorizedBy,
+      reason
     } = await request.json();
 
-    // Basic validation
+    // SIMPLIFIED: Basic validation only - NO enhanced security required
     if (!email || !password || !firstName || !lastName || !confirmPassword) {
       return NextResponse.json(
-        { error: "All basic fields are required" },
+        { error: "All basic fields are required (email, password, first name, last name)" },
         { status: 400 }
       );
     }
 
-    // Validate role - case insensitive, normalize to title case
-    const normalizedRole = role.charAt(0).toUpperCase() + role.slice(1).toLowerCase();
-    const validRoles = ["Voter", "Admin", "Superadmin"];
-    if (!validRoles.includes(normalizedRole)) {
+    // Validate role
+    const validRoles = ["voter", "admin", "super_admin"];
+    if (!validRoles.includes(role)) {
       return NextResponse.json(
         { error: "Invalid role specified" },
         { status: 400 }
       );
     }
+
+    // REMOVED: Enhanced security validation - optional for now
+    // All advanced fields (phone, aadhaar, security questions, etc.) are now OPTIONAL
 
     if (password !== confirmPassword) {
       return NextResponse.json(
@@ -100,7 +112,12 @@ export async function POST(request: NextRequest) {
       created_at: new Date().toISOString(),
     };
 
-    // Simplified registration - no advanced fields required
+    // Add additional data if columns exist (will be ignored if they don't)
+    if (phoneNumber) userData.phone_number = phoneNumber;
+    if (aadhaarNumber) userData.aadhaar_number = aadhaarNumber.replace(/\s/g, '');
+    if (collegeId) userData.college_id = collegeId;
+    if (instituteName) userData.institute_name = instituteName;
+
     try {
       const userResult = await db.query(
         `INSERT INTO users (user_id, email, first_name, last_name, status, password_hash, created_at)
@@ -125,12 +142,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Assign role to user
+    // Note: Advanced security features (security questions, biometric data) 
+    // will be implemented when corresponding database tables are created
+
+    // Assign role to user using simplified approach
+    const roleMap: { [key: string]: string } = {
+      voter: "Voter",
+      admin: "Admin", 
+      super_admin: "SuperAdmin"
+    };
+
+    const roleName = roleMap[role];
+    
     try {
       // Assign role to user (using simplified table structure)
       await db.query(
         "INSERT INTO user_roles (user_id, role_name, created_at) VALUES ($1, $2, $3)",
-        [userId, normalizedRole, new Date().toISOString()]
+        [userId, roleName, new Date().toISOString()]
       );
     } catch (roleError) {
       console.error("Error assigning role:", roleError);
@@ -143,18 +171,18 @@ export async function POST(request: NextRequest) {
     }
 
     // Log user registration
-    console.log(`User registered successfully: ${email.toLowerCase()} with role: ${normalizedRole}`);
+    console.log(`User registered successfully: ${email.toLowerCase()} with role: ${role}`);
 
+    // SIMPLIFIED: Basic success response
     return NextResponse.json(
       {
-        message: "User registration completed successfully",
+        message: "User registration completed successfully! Please log in to continue.",
         user: {
           id: userId,
           email: email.toLowerCase(),
           firstName: firstName.trim(),
           lastName: lastName.trim(),
-          role: normalizedRole,
-          emailVerified: false,
+          role,
         },
         success: true
       },
