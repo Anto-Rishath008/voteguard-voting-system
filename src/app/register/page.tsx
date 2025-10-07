@@ -1064,25 +1064,41 @@ export default function RegisterPage() {
 
               {/* Show Register button on Step 1, and allow preview navigation for Steps 2-5 */}
               {currentStep === 1 ? (
-                <div className="flex gap-2">
-                  <Button
-                    onClick={nextStep}
-                    variant="outline"
-                    disabled={!validateStep(currentStep)}
-                    className="flex items-center"
-                  >
-                    Preview Next Steps
-                    <ArrowRight className="h-4 w-4 ml-1" />
-                  </Button>
-                  <Button
-                    onClick={handleSubmit}
-                    isLoading={loading}
-                    disabled={!validateStep(currentStep)}
-                    className="flex items-center bg-green-600 hover:bg-green-700"
-                  >
-                    <CheckCircle className="h-4 w-4 mr-1" />
-                    Create Account
-                  </Button>
+                <div className="flex flex-col gap-2">
+                  {/* Validation hints */}
+                  {!validateStep(currentStep) && (
+                    <div className="text-xs text-gray-500 text-right">
+                      {!formData.firstName && "• First name required "}
+                      {!formData.lastName && "• Last name required "}
+                      {!formData.email && "• Email required "}
+                      {!formData.password && "• Password required "}
+                      {!formData.confirmPassword && "• Confirm password required "}
+                      {formData.password && formData.confirmPassword && formData.password !== formData.confirmPassword && "• Passwords must match "}
+                      {formData.password && formData.password.length < 8 && "• Password must be 8+ characters "}
+                      {!formData.role && "• Please select account type "}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={nextStep}
+                      variant="outline"
+                      disabled={!validateStep(currentStep)}
+                      className="flex items-center"
+                    >
+                      Preview Next Steps
+                      <ArrowRight className="h-4 w-4 ml-1" />
+                    </Button>
+                    <Button
+                      onClick={handleSubmit}
+                      isLoading={loading}
+                      disabled={!validateStep(currentStep) || loading}
+                      className="flex items-center bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                      title={!validateStep(currentStep) ? "Please fill all required fields" : "Create your account"}
+                    >
+                      <CheckCircle className="h-4 w-4 mr-1" />
+                      Create Account
+                    </Button>
+                  </div>
                 </div>
               ) : currentStep < securityLevel.steps ? (
                 <Button
