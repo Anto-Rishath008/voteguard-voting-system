@@ -49,7 +49,13 @@ export async function POST(
       [electionId, authUser.userId]
     );
 
-    if (eligibilityResult.rows.length === 0 || eligibilityResult.rows[0].status !== 'eligible') {
+    // Admin and SuperAdmin users are always eligible to vote
+    const isEligible = 
+      authUser.primaryRole === 'Admin' || 
+      authUser.primaryRole === 'SuperAdmin' || 
+      (eligibilityResult.rows.length > 0 && eligibilityResult.rows[0].status === 'eligible');
+
+    if (!isEligible) {
       return NextResponse.json(
         { error: "You are not eligible to vote in this election" },
         { status: 403 }

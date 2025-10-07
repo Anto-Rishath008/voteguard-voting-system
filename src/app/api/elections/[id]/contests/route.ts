@@ -40,7 +40,11 @@ export async function GET(
       [electionId, authUser.userId]
     );
 
-    const isEligible = eligibilityResult.rows.length > 0 && eligibilityResult.rows[0].status === 'eligible';
+    // Admin and SuperAdmin users are always eligible to vote
+    const isEligible = 
+      authUser.primaryRole === 'Admin' || 
+      authUser.primaryRole === 'SuperAdmin' || 
+      (eligibilityResult.rows.length > 0 && eligibilityResult.rows[0].status === 'eligible');
 
     // Get contests and candidates
     const contestsResult = await db.query(`
