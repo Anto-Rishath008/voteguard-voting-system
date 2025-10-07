@@ -13,7 +13,7 @@ import {
   Phone, CreditCard, Fingerprint, FileText, 
   CheckCircle, ArrowRight, ArrowLeft, Eye, 
   Smartphone, IdCard, University, AlertTriangle,
-  Send, RefreshCw
+  Send, RefreshCw, Construction
 } from "lucide-react";
 
 // Security Questions Bank
@@ -344,6 +344,7 @@ export default function RegisterPage() {
   const nextStep = () => {
     if (validateStep(currentStep)) {
       setStepValidation(prev => ({ ...prev, [currentStep]: true }));
+      // Since steps 2-5 are under construction, allow going to next step for preview only
       setCurrentStep(prev => Math.min(prev + 1, securityLevel.steps));
       setError("");
     } else {
@@ -360,31 +361,29 @@ export default function RegisterPage() {
     setLoading(true);
     setError("");
 
-    // Final validation
-    if (!validateStep(currentStep)) {
-      setError("Please complete all required fields");
+    // For simplified registration, only validate Step 1
+    if (!validateStep(1)) {
+      setError("Please complete all required fields in Step 1");
       setLoading(false);
       return;
     }
 
     try {
-      // Submit enhanced registration data
-      const registrationData: EnhancedRegistrationData = {
-        email: formData.email,
-        password: formData.password,
-        confirmPassword: formData.confirmPassword,
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        role: formData.role,
-        phoneNumber: formData.phoneNumber,
-        aadhaarNumber: formData.aadhaarNumber,
-        collegeId: formData.collegeId,
-        securityQuestions: formData.securityQuestions,
-        fingerprintData: formData.fingerprintData || "",
-        agreedToTerms: formData.agreedToTerms
-      };
+      // Use simple registration for now (only Step 1 data)
+      const result = await signUp(
+        formData.email,
+        formData.password,
+        formData.confirmPassword,
+        formData.firstName,
+        formData.lastName,
+        formData.role
+      );
 
-      await signUpEnhanced(registrationData);
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      // Redirect to dashboard after successful registration
       router.push("/dashboard");
     } catch (err: any) {
       setError(err.message || "Registration failed");
@@ -393,7 +392,7 @@ export default function RegisterPage() {
     }
   };
 
-  // Render step indicator
+  // Render step indicator with blur effect for steps 2-5
   const renderStepIndicator = () => (
     <div className="flex justify-center mb-8">
       <div className="flex items-center space-x-4">
@@ -401,18 +400,20 @@ export default function RegisterPage() {
           const stepNum = i + 1;
           const isActive = stepNum === currentStep;
           const isCompleted = stepValidation[stepNum as keyof typeof stepValidation];
+          const isUnderConstruction = stepNum > 1; // Steps 2-5 are under construction
           
           return (
             <div key={stepNum} className="flex items-center">
               <div className={`
                 w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold
-                ${isCompleted ? 'bg-green-500 text-white' : 
+                ${isUnderConstruction ? 'bg-gray-300 text-gray-500 blur-sm' :
+                  isCompleted ? 'bg-green-500 text-white' : 
                   isActive ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-600'}
               `}>
                 {isCompleted ? <CheckCircle className="w-5 h-5" /> : stepNum}
               </div>
               {stepNum < securityLevel.steps && (
-                <div className={`w-12 h-1 ${isCompleted ? 'bg-green-500' : 'bg-gray-200'}`} />
+                <div className={`w-12 h-1 ${isUnderConstruction ? 'bg-gray-300 blur-sm' : isCompleted ? 'bg-green-500' : 'bg-gray-200'}`} />
               )}
             </div>
           );
@@ -552,6 +553,57 @@ export default function RegisterPage() {
       </div>
     </div>
   );
+
+  // Under Construction Component for Steps 2-5
+  const renderUnderConstruction = (stepNumber: number) => {
+    const stepTitles: { [key: number]: string } = {
+      2: "Contact Verification",
+      3: "ID Verification",
+      4: "Security Questions",
+      5: "Biometric & Final Setup"
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="text-center mb-8 blur-sm pointer-events-none select-none">
+          <h3 className="text-xl font-semibold text-gray-400 mb-2">
+            Step {stepNumber}: {stepTitles[stepNumber]}
+          </h3>
+          <p className="text-gray-400">Enhanced security verification</p>
+        </div>
+
+        <div className="relative">
+          {/* Blurred preview content */}
+          <div className="blur-md pointer-events-none select-none opacity-40 space-y-4">
+            <div className="bg-gray-100 h-12 rounded"></div>
+            <div className="bg-gray-100 h-12 rounded"></div>
+            <div className="bg-gray-100 h-24 rounded"></div>
+          </div>
+
+          {/* Under Construction Overlay */}
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/90 backdrop-blur-sm">
+            <Construction className="w-16 h-16 text-yellow-500 mb-4 animate-pulse" />
+            <h3 className="text-2xl font-bold text-gray-700 mb-2">Under Construction</h3>
+            <p className="text-gray-600 text-center max-w-md mb-4">
+              This enhanced security feature is currently under development.
+            </p>
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 max-w-md">
+              <p className="text-sm text-yellow-800 text-center">
+                <strong>Coming Soon:</strong> {stepTitles[stepNumber]} will add an extra layer of security to your account
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Informational message */}
+        <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <p className="text-sm text-blue-800 text-center">
+            <strong>Note:</strong> For now, you can complete registration with basic information from Step 1
+          </p>
+        </div>
+      </div>
+    );
+  };
 
   const renderStep2 = () => (
     <div className="space-y-6">
@@ -992,10 +1044,10 @@ export default function RegisterPage() {
             {/* Step Content */}
             <div className="min-h-[400px]">
               {currentStep === 1 && renderStep1()}
-              {currentStep === 2 && renderStep2()}
-              {currentStep === 3 && renderStep3()}
-              {currentStep === 4 && renderStep4()}
-              {currentStep === 5 && renderStep5()}
+              {currentStep === 2 && renderUnderConstruction(2)}
+              {currentStep === 3 && renderUnderConstruction(3)}
+              {currentStep === 4 && renderUnderConstruction(4)}
+              {currentStep === 5 && renderUnderConstruction(5)}
             </div>
 
             {/* Navigation Buttons */}
@@ -1010,24 +1062,43 @@ export default function RegisterPage() {
                 Previous
               </Button>
 
-              {currentStep < securityLevel.steps ? (
+              {/* Show Register button on Step 1, and allow preview navigation for Steps 2-5 */}
+              {currentStep === 1 ? (
+                <div className="flex gap-2">
+                  <Button
+                    onClick={nextStep}
+                    variant="outline"
+                    disabled={!validateStep(currentStep)}
+                    className="flex items-center"
+                  >
+                    Preview Next Steps
+                    <ArrowRight className="h-4 w-4 ml-1" />
+                  </Button>
+                  <Button
+                    onClick={handleSubmit}
+                    isLoading={loading}
+                    disabled={!validateStep(currentStep)}
+                    className="flex items-center bg-green-600 hover:bg-green-700"
+                  >
+                    <CheckCircle className="h-4 w-4 mr-1" />
+                    Create Account
+                  </Button>
+                </div>
+              ) : currentStep < securityLevel.steps ? (
                 <Button
                   onClick={nextStep}
-                  disabled={!validateStep(currentStep)}
                   className="flex items-center"
                 >
-                  Next
+                  Preview Next
                   <ArrowRight className="h-4 w-4 ml-1" />
                 </Button>
               ) : (
                 <Button
-                  onClick={handleSubmit}
-                  isLoading={loading}
-                  disabled={!validateStep(currentStep)}
-                  className="flex items-center bg-green-600 hover:bg-green-700"
+                  onClick={() => setCurrentStep(1)}
+                  className="flex items-center bg-blue-600 hover:bg-blue-700"
                 >
-                  <CheckCircle className="h-4 w-4 mr-1" />
-                  Create Account
+                  Back to Registration
+                  <ArrowLeft className="h-4 w-4 ml-1" />
                 </Button>
               )}
             </div>
