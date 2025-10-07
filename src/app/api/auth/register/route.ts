@@ -66,11 +66,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Super admin specific validation - only if super_admin role is selected
-    if (role === "super_admin") {
+    // Super admin specific validation - only if all super_admin fields are provided
+    // For simplified registration, these fields are optional (Steps 2-5 under construction)
+    if (role === "super_admin" && (referenceCode || authorizedBy || reason)) {
       if (!referenceCode || !authorizedBy || !reason) {
         return NextResponse.json(
-          { error: "Super admin registration requires reference code, authorizer, and reason" },
+          { error: "If providing super admin authorization, all fields (reference code, authorizer, and reason) are required" },
           { status: 400 }
         );
       }
