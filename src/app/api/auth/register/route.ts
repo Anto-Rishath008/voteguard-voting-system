@@ -41,34 +41,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Enhanced security validation - ALL users now require Aadhaar
-    if (!phoneNumber || !aadhaarNumber) {
-      return NextResponse.json(
-        { error: "All users require phone number and Aadhaar number for enhanced security" },
-        { status: 400 }
-      );
-    }
-
-    // Role-specific additional validation
-    if (role !== "voter") {
+    // Enhanced security validation - OPTIONAL for simplified registration
+    // When phoneNumber or aadhaarNumber is provided, validate them
+    // But don't require them for basic registration (Steps 2-5 are under construction)
+    
+    // Role-specific additional validation - only if enhanced data is provided
+    if (role !== "voter" && (collegeId || instituteName)) {
       if (!collegeId || !instituteName) {
         return NextResponse.json(
-          { error: "Admin roles require college ID and institution name in addition to basic requirements" },
+          { error: "Admin roles require both college ID and institution name" },
           { status: 400 }
         );
       }
     }
 
-    // Security questions validation - Enhanced for all users
-    const requiredQuestions = role === "voter" ? 2 : role === "admin" ? 2 : 3;
-    if (!securityQuestions || securityQuestions.length < requiredQuestions) {
-      return NextResponse.json(
-        { error: `Enhanced security requires ${requiredQuestions} security question(s) for ${role.replace('_', ' ')} role` },
-        { status: 400 }
-      );
+    // Security questions validation - only if provided
+    if (securityQuestions && securityQuestions.length > 0) {
+      const requiredQuestions = role === "voter" ? 2 : role === "admin" ? 2 : 3;
+      if (securityQuestions.length < requiredQuestions) {
+        return NextResponse.json(
+          { error: `Enhanced security requires ${requiredQuestions} security question(s) for ${role.replace('_', ' ')} role` },
+          { status: 400 }
+        );
+      }
     }
 
-    // Super admin specific validation
+    // Super admin specific validation - only if super_admin role is selected
     if (role === "super_admin") {
       if (!referenceCode || !authorizedBy || !reason) {
         return NextResponse.json(
@@ -78,16 +76,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Phone number validation
-    const phoneRegex = /^\+\d{10,15}$/;
-    if (phoneNumber && !phoneRegex.test(phoneNumber)) {
-      return NextResponse.json(
-        { error: "Invalid phone number format. Use international format (+1234567890)" },
-        { status: 400 }
-      );
+    // Phone number validation - only if provided
+    if (phoneNumber) {
+      const phoneRegex = /^\+\d{10,15}$/;
+      if (!phoneRegex.test(phoneNumber)) {
+        return NextResponse.json(
+          { error: "Invalid phone number format. Use international format (+1234567890)" },
+          { status: 400 }
+        );
+      }
     }
 
-    // Aadhaar validation (if provided)
+    // Aadhaar validation - only if provided
     if (aadhaarNumber) {
       const aadhaarRegex = /^\d{4}\s?\d{4}\s?\d{4}$/;
       if (!aadhaarRegex.test(aadhaarNumber.replace(/\s/g, ''))) {
