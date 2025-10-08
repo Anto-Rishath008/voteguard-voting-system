@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDatabase } from "@/lib/enhanced-database";
+import { supabaseAuth } from "@/lib/supabase-auth";
 import { v4 as uuidv4 } from "uuid";
 import bcrypt from "bcryptjs";
 
@@ -57,20 +57,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const db = getDatabase();
-    if (!db) {
-      return NextResponse.json(
-        { error: "Database connection failed" },
-        { status: 500 }
-      );
-    }
-
-    // Check if user already exists
-    const existingUserResult = await db.query(
-      "SELECT email FROM users WHERE email = $1",
-      [email.toLowerCase()]
-    );
-    const existingUser = existingUserResult.rows[0];
+    // Check if user already exists using Supabase client
+    const { data: existingUser, error: checkError } = await supabaseAuth.supabaseAdmin
+      .from('users')
+      .select('email')
+      .eq('email', email.toLowerCase())
+      .single();
 
     if (existingUser) {
       return NextResponse.json(
@@ -81,28 +73,33 @@ export async function POST(request: NextRequest) {
 
     const userId = uuidv4();
 
-    // Hash password manually since we might not have RPC functions
+    // Hash password
     const saltRounds = 12;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    // Create user with basic data
-
+    // Create user using Supabase client
     try {
-      const userResult = await db.query(
-        `INSERT INTO users (user_id, email, first_name, last_name, status, password_hash, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING user_id, email, first_name, last_name, status, created_at`,
-        [userId, email.toLowerCase(), firstName.trim(), lastName.trim(), "Active", passwordHash, new Date().toISOString()]
-      );
+      const { data: newUser, error: insertError } = await supabaseAuth.supabaseAdmin
+        .from('users')
+        .insert([{
+          user_id: userId,
+          email: email.toLowerCase(),
+          first_name: firstName.trim(),
+          last_name: lastName.trim(),
+          status: 'Active',
+          password_hash: passwordHash,
+          created_at: new Date().toISOString()
+        }])
+        .select()
+        .single();
       
-      if (!userResult.rows || userResult.rows.length === 0) {
+      if (insertError || !newUser) {
+        console.error('Error creating user:', insertError);
         return NextResponse.json(
           { error: "Failed to create user account" },
           { status: 500 }
         );
       }
-      
-      const user = userResult.rows[0];
     } catch (userError) {
       console.error("Error creating user:", userError);
       return NextResponse.json(
@@ -121,15 +118,36 @@ export async function POST(request: NextRequest) {
     const roleName = roleMap[role];
     
     try {
-      // Assign role to user
-      await db.query(
-        "INSERT INTO user_roles (user_id, role_name, created_at) VALUES ($1, $2, $3)",
-        [userId, roleName, new Date().toISOString()]
-      );
+      // Assign role using Supabase client
+      const { error: roleError } = await supabaseAuth.supabaseAdmin
+        .from('user_roles')
+        .insert([{
+          user_id: userId,
+          role_name: roleName,
+          created_at: new Date().toISOString()
+        }]);
+
+      if (roleError) {
+        console.error("Error assigning role:", roleError);
+        // Try to cleanup user if role assignment fails
+        await supabaseAuth.supabaseAdmin
+          .from('users')
+          .delete()
+          .eq('user_id', userId);
+        
+        return NextResponse.json(
+          { error: "Failed to complete user registration" },
+          { status: 500 }
+        );
+      }
     } catch (roleError) {
       console.error("Error assigning role:", roleError);
       // Try to cleanup user if role assignment fails
-      await db.query("DELETE FROM users WHERE user_id = $1", [userId]);
+      await supabaseAuth.supabaseAdmin
+        .from('users')
+        .delete()
+        .eq('user_id', userId);
+      
       return NextResponse.json(
         { error: "Failed to complete user registration" },
         { status: 500 }
