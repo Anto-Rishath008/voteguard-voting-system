@@ -11,23 +11,13 @@ export async function POST(request: NextRequest) {
       firstName, 
       lastName, 
       confirmPassword, 
-      role = "voter",
-      // Optional enhanced security data (for future use)
-      phoneNumber,
-      aadhaarNumber,
-      collegeId,
-      instituteName,
-      securityQuestions = [],
-      fingerprintData,
-      referenceCode,
-      authorizedBy,
-      reason
+      role = "voter"
     } = await request.json();
 
-    // SIMPLIFIED: Basic validation only - NO enhanced security required
+    // Basic validation
     if (!email || !password || !firstName || !lastName || !confirmPassword) {
       return NextResponse.json(
-        { error: "All basic fields are required (email, password, first name, last name)" },
+        { error: "All fields are required" },
         { status: 400 }
       );
     }
@@ -41,9 +31,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // REMOVED: Enhanced security validation - optional for now
-    // All advanced fields (phone, aadhaar, security questions, etc.) are now OPTIONAL
-
     if (password !== confirmPassword) {
       return NextResponse.json(
         { error: "Passwords do not match" },
@@ -51,14 +38,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Password strength validation
-    const passwordRegex =
-      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
-    if (!passwordRegex.test(password)) {
+    // Simple password validation - at least 8 characters
+    if (password.length < 8) {
       return NextResponse.json(
         {
-          error:
-            "Password must be at least 8 characters long and contain uppercase, lowercase, number, and special character",
+          error: "Password must be at least 8 characters long",
         },
         { status: 400 }
       );
@@ -101,22 +85,7 @@ export async function POST(request: NextRequest) {
     const saltRounds = 12;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    // Create user with enhanced security data
-    const userData: any = {
-      user_id: userId,
-      email: email.toLowerCase(),
-      first_name: firstName.trim(),
-      last_name: lastName.trim(),
-      status: "Active",
-      password_hash: passwordHash,
-      created_at: new Date().toISOString(),
-    };
-
-    // Add additional data if columns exist (will be ignored if they don't)
-    if (phoneNumber) userData.phone_number = phoneNumber;
-    if (aadhaarNumber) userData.aadhaar_number = aadhaarNumber.replace(/\s/g, '');
-    if (collegeId) userData.college_id = collegeId;
-    if (instituteName) userData.institute_name = instituteName;
+    // Create user with basic data
 
     try {
       const userResult = await db.query(
@@ -142,10 +111,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Note: Advanced security features (security questions, biometric data) 
-    // will be implemented when corresponding database tables are created
-
-    // Assign role to user using simplified approach
+    // Assign role to user
     const roleMap: { [key: string]: string } = {
       voter: "Voter",
       admin: "Admin", 
@@ -155,7 +121,7 @@ export async function POST(request: NextRequest) {
     const roleName = roleMap[role];
     
     try {
-      // Assign role to user (using simplified table structure)
+      // Assign role to user
       await db.query(
         "INSERT INTO user_roles (user_id, role_name, created_at) VALUES ($1, $2, $3)",
         [userId, roleName, new Date().toISOString()]
@@ -170,21 +136,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Log user registration
+    // Log user registration (simplified for now)
     console.log(`User registered successfully: ${email.toLowerCase()} with role: ${role}`);
 
-    // SIMPLIFIED: Basic success response
     return NextResponse.json(
       {
-        message: "User registration completed successfully! Please log in to continue.",
+        message: "User registration completed successfully",
         user: {
           id: userId,
           email: email.toLowerCase(),
           firstName: firstName.trim(),
           lastName: lastName.trim(),
-          role,
-        },
-        success: true
+          role
+        }
       },
       { status: 201 }
     );

@@ -34,7 +34,7 @@ interface User {
 
 export default function AdminUsersPage() {
   const router = useRouter();
-  const { user, hasRole, loading: authLoading } = useAuth();
+  const { user: authUser, hasRole, loading: authLoading } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -161,14 +161,17 @@ export default function AdminUsersPage() {
     if (!selectedUser) return;
     
     setActionLoading(true);
+    setError(''); // Clear previous errors
     try {
       const response = await fetch(`/api/admin/users/${selectedUser.user_id}`, {
         method: 'DELETE',
         credentials: 'include',
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error('Failed to delete user');
+        throw new Error(data.error || 'Failed to delete user');
       }
 
       // Refresh users list
@@ -177,6 +180,7 @@ export default function AdminUsersPage() {
       setSelectedUser(null);
     } catch (err: any) {
       setError(err.message);
+      setShowDeleteModal(false); // Close modal but show error
     } finally {
       setActionLoading(false);
     }
@@ -415,13 +419,41 @@ export default function AdminUsersPage() {
                             >
                               <Edit className="h-4 w-4" />
                             </Button>
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              onClick={() => handleDeleteUser(user)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            {/* Only show delete button if current user has permission */}
+                            {(() => {
+                              const isSuperAdmin = hasRole('SuperAdmin');
+                              const isAdmin = hasRole('Admin');
+                              const targetIsSuperAdmin = user.roles.some(r => r.toLowerCase() === 'superadmin');
+                              const targetIsAdmin = user.roles.some(r => r.toLowerCase() === 'admin');
+                              const targetIsCurrentUser = user.user_id === authUser?.userId;
+                              
+                              // SuperAdmin can delete anyone except themselves
+                              // Admin can only delete Voters
+                              const canDelete = isSuperAdmin 
+                                ? !targetIsCurrentUser 
+                                : isAdmin && !targetIsSuperAdmin && !targetIsAdmin && !targetIsCurrentUser;
+                              
+                              return (
+                                <Button 
+                                  variant="outline" 
+                                  size="sm"
+                                  onClick={() => handleDeleteUser(user)}
+                                  disabled={!canDelete}
+                                  title={
+                                    !canDelete 
+                                      ? (targetIsCurrentUser 
+                                          ? "Cannot delete your own account"
+                                          : (isAdmin && !isSuperAdmin)
+                                            ? "Admins can only delete Voter accounts"
+                                            : "Permission denied"
+                                        )
+                                      : "Delete user"
+                                  }
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              );
+                            })()}
                           </div>
                         </td>
                       </tr>

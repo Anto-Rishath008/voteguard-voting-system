@@ -6,14 +6,24 @@ import { getDatabase } from "@/lib/database";
 async function checkUserRole(userId: string, requiredRole: string): Promise<boolean> {
   const db = getDatabase();
   try {
+    // First, let's see what roles this user has
+    const userRoles = await db.query(
+      `SELECT role_name FROM user_roles WHERE user_id = $1`,
+      [userId]
+    );
+    console.log(`User ${userId} has roles:`, userRoles.rows.map((r: any) => r.role_name));
+    console.log(`Checking for role: ${requiredRole}`);
+    
+    // Check for the exact role (case-insensitive)
     const result = await db.query(
-      `SELECT ur.user_id 
-       FROM user_roles ur 
-       JOIN roles r ON ur.role_id = r.role_id 
-       WHERE ur.user_id = $1 AND r.role_name = $2`,
+      `SELECT user_id FROM user_roles 
+       WHERE user_id = $1 AND LOWER(role_name) = LOWER($2)`,
       [userId, requiredRole]
     );
-    return result.rows.length > 0;
+    
+    const hasRole = result.rows.length > 0;
+    console.log(`User has ${requiredRole} role:`, hasRole);
+    return hasRole;
   } catch (error) {
     console.error("Error checking user role:", error);
     return false;
@@ -24,9 +34,11 @@ async function checkUserRole(userId: string, requiredRole: string): Promise<bool
 async function logAudit(userId: string, action: string, resourceType: string, resourceId: string, details: any) {
   const db = getDatabase();
   try {
+    // Note: Table is 'audit_log' (singular), not 'audit_logs'
+    // Schema uses: operation_type, table_name, record_id, new_values
     await db.query(
-      `INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details, timestamp)
-       VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
+      `INSERT INTO audit_log (user_id, operation_type, table_name, record_id, new_values)
+       VALUES ($1, $2, $3, $4, $5)`,
       [userId, action, resourceType, resourceId, JSON.stringify(details)]
     );
   } catch (error) {
@@ -45,15 +57,22 @@ export async function DELETE(
   try {
     // Verify user authentication
     const { user: authUser, error: authError } = verifyJWT(request);
+    console.log("DELETE - Auth check:", { authUser: authUser?.userId, error: authError });
+    
     if (authError || !authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Check if user has admin permissions
+    // Check if user has admin or superadmin permissions
     const hasAdminPermission = await checkUserRole(authUser.userId, "Admin");
-    if (!hasAdminPermission) {
+    const hasSuperAdminPermission = await checkUserRole(authUser.userId, "SuperAdmin");
+    
+    console.log("DELETE - Permission check:", { hasAdminPermission, hasSuperAdminPermission });
+    
+    if (!hasAdminPermission && !hasSuperAdminPermission) {
+      console.log("DELETE - Access denied for user:", authUser.userId);
       return NextResponse.json(
-        { error: "Admin access required" },
+        { error: "Admin or SuperAdmin access required" },
         { status: 403 }
       );
     }
@@ -86,17 +105,141 @@ export async function DELETE(
       );
     }
 
-    // Delete user roles first (foreign key constraint)
-    await db.query(
-      `DELETE FROM user_roles WHERE user_id = $1`,
+    // Check the target user's role(s)
+    const targetUserRoles = await db.query(
+      `SELECT role_name FROM user_roles WHERE user_id = $1`,
       [userId]
     );
 
-    // Delete the user
+    const targetRoles = targetUserRoles.rows.map((r: any) => r.role_name.toLowerCase());
+    console.log(`Target user ${user.email} has roles:`, targetRoles);
+
+    // Check if target user is a SuperAdmin or Admin
+    const isTargetSuperAdmin = targetRoles.includes('superadmin');
+    const isTargetAdmin = targetRoles.includes('admin');
+
+    // If current user is only an Admin (not SuperAdmin)
+    if (hasAdminPermission && !hasSuperAdminPermission) {
+      // Admin can only delete Voter accounts
+      if (isTargetSuperAdmin || isTargetAdmin) {
+        console.log(`❌ Admin tried to delete ${isTargetSuperAdmin ? 'SuperAdmin' : 'Admin'} account`);
+        return NextResponse.json(
+          { error: "Admins can only delete Voter accounts. SuperAdmin access required to delete Admin or SuperAdmin accounts." },
+          { status: 403 }
+        );
+      }
+    }
+
+    // SuperAdmin can delete anyone (except themselves, already checked above)
+    console.log(`✅ Permission granted to delete user: ${user.email}`);
+    console.log(`🗑️  Starting cascading delete for user: ${user.email}`);
+
+    // Delete all foreign key references before deleting the user
+    // Order matters: delete from child tables first
+    
+    // 1. Delete from security_events (references user_sessions and users)
+    try {
+      const securityEventsResult = await db.query(
+        `DELETE FROM security_events WHERE user_id = $1`,
+        [userId]
+      );
+      console.log(`   Deleted ${securityEventsResult.rowCount || 0} security_events`);
+    } catch (error: any) {
+      if (error.code === '42P01') {
+        console.log(`   Table security_events does not exist, skipping`);
+      } else {
+        throw error;
+      }
+    }
+
+    // 2. Delete from anomaly_detections (references user_sessions and users) - if exists
+    try {
+      const anomalyResult = await db.query(
+        `DELETE FROM anomaly_detections WHERE affected_user_id = $1`,
+        [userId]
+      );
+      console.log(`   Deleted ${anomalyResult.rowCount || 0} anomaly_detections`);
+    } catch (error: any) {
+      if (error.code === '42P01') {
+        console.log(`   Table anomaly_detections does not exist, skipping`);
+      } else {
+        throw error;
+      }
+    }
+
+    // 3. Delete from verification_tokens - if exists
+    try {
+      const tokensResult = await db.query(
+        `DELETE FROM verification_tokens WHERE user_id = $1`,
+        [userId]
+      );
+      console.log(`   Deleted ${tokensResult.rowCount || 0} verification_tokens`);
+    } catch (error: any) {
+      if (error.code === '42P01') {
+        console.log(`   Table verification_tokens does not exist, skipping`);
+      } else {
+        throw error;
+      }
+    }
+
+    // 4. Delete from eligible_voters
+    const eligibleResult = await db.query(
+      `DELETE FROM eligible_voters WHERE user_id = $1 OR added_by = $1`,
+      [userId]
+    );
+    console.log(`   Deleted ${eligibleResult.rowCount || 0} eligible_voters`);
+
+    // 5. Delete from votes (if any - though this might be restricted for audit purposes)
+    // Note: You may want to keep votes for audit trail, so commented out
+    // const votesResult = await db.query(
+    //   `DELETE FROM votes WHERE voter_id = $1`,
+    //   [userId]
+    // );
+    // console.log(`   Deleted ${votesResult.rowCount || 0} votes`);
+
+    // 6. Delete from user_sessions
+    const sessionsResult = await db.query(
+      `DELETE FROM user_sessions WHERE user_id = $1`,
+      [userId]
+    );
+    console.log(`   Deleted ${sessionsResult.rowCount || 0} user_sessions`);
+
+    // 7. Delete from audit_log (references user_id)
+    const auditResult = await db.query(
+      `DELETE FROM audit_log WHERE user_id = $1`,
+      [userId]
+    );
+    console.log(`   Deleted ${auditResult.rowCount || 0} audit_log entries`);
+
+    // 8. Handle elections created by this user
+    // We need to either delete them or reassign them
+    // For safety, we'll reassign to the current admin user
+    const electionsResult = await db.query(
+      `UPDATE elections SET creator = $1 WHERE creator = $2`,
+      [authUser.userId, userId]
+    );
+    console.log(`   Reassigned ${electionsResult.rowCount || 0} elections to current admin`);
+
+    // 9. Delete user_roles where this user assigned roles (assigned_by)
+    const assignedRolesResult = await db.query(
+      `UPDATE user_roles SET assigned_by = NULL WHERE assigned_by = $1`,
+      [userId]
+    );
+    console.log(`   Nullified ${assignedRolesResult.rowCount || 0} role assignments`);
+
+    // 10. Delete from user_roles
+    const rolesResult = await db.query(
+      `DELETE FROM user_roles WHERE user_id = $1`,
+      [userId]
+    );
+    console.log(`   Deleted ${rolesResult.rowCount || 0} user_roles`);
+
+    // 11. Finally, delete the user
     const deleteResult = await db.query(
       `DELETE FROM users WHERE user_id = $1`,
       [userId]
     );
+    console.log(`   Deleted ${deleteResult.rowCount || 0} user(s)`);
 
     if (deleteResult.rowCount === 0) {
       return NextResponse.json(
@@ -105,8 +248,10 @@ export async function DELETE(
       );
     }
 
+    console.log(`✅ Successfully deleted user: ${user.email}`);
+
     // Log the deletion
-    await logAudit(authUser.userId, "DELETE_USER", "USER", userId, {
+    await logAudit(authUser.userId, "DELETE", "users", userId, {
       deletedUser: user.email,
       deletedBy: authUser.email
     });
@@ -118,8 +263,23 @@ export async function DELETE(
 
   } catch (error) {
     console.error("Error deleting user:", error);
+    
+    // Provide more detailed error message
+    let errorMessage = "Internal server error";
+    if (error instanceof Error) {
+      console.error("Error details:", error.message);
+      console.error("Error stack:", error.stack);
+      
+      // Check for specific database errors
+      if (error.message.includes("foreign key constraint")) {
+        errorMessage = "Cannot delete user due to foreign key constraint. Please check related records.";
+      } else if (error.message.includes("violates")) {
+        errorMessage = "Database constraint violation: " + error.message;
+      }
+    }
+    
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: errorMessage, details: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }
@@ -137,14 +297,13 @@ export async function PATCH(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Check if user has admin permissions
-    const hasAdminPermission = await checkUserRole(
-      authUser.userId,
-      "Admin"
-    );
-    if (!hasAdminPermission) {
+    // Check if user has admin or superadmin permissions
+    const hasAdminPermission = await checkUserRole(authUser.userId, "Admin");
+    const hasSuperAdminPermission = await checkUserRole(authUser.userId, "SuperAdmin");
+    
+    if (!hasAdminPermission && !hasSuperAdminPermission) {
       return NextResponse.json(
-        { error: "Admin access required" },
+        { error: "Admin or SuperAdmin access required" },
         { status: 403 }
       );
     }
@@ -238,14 +397,13 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Check if user has admin permissions
-    const hasAdminPermission = await checkUserRole(
-      authUser.userId,
-      "Admin"
-    );
-    if (!hasAdminPermission) {
+    // Check if user has admin or superadmin permissions
+    const hasAdminPermission = await checkUserRole(authUser.userId, "Admin");
+    const hasSuperAdminPermission = await checkUserRole(authUser.userId, "SuperAdmin");
+    
+    if (!hasAdminPermission && !hasSuperAdminPermission) {
       return NextResponse.json(
-        { error: "Admin access required" },
+        { error: "Admin or SuperAdmin access required" },
         { status: 403 }
       );
     }
@@ -274,10 +432,7 @@ export async function GET(
 
     // Get user roles
     const rolesResult = await db.query(
-      `SELECT r.role_name 
-       FROM user_roles ur 
-       JOIN roles r ON ur.role_id = r.role_id 
-       WHERE ur.user_id = $1`,
+      `SELECT role_name FROM user_roles WHERE user_id = $1`,
       [userId]
     );
 
