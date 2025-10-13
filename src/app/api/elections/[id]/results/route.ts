@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDatabase } from "@/lib/database";
+import { supabaseAuth } from "@/lib/supabase-auth";
 import { verifyJWT } from "@/lib/auth";
 
 export async function GET(
@@ -19,25 +19,17 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const db = getDatabase();
-    if (!db) {
-      console.error("📊 [Results API] ❌ Database connection failed");
-      return NextResponse.json(
-        { error: "Database connection failed" },
-        { status: 500 }
-      );
-    }
-    console.log("📊 [Results API] ✅ Database connected");
+    console.log("📊 [Results API] ✅ Using Supabase client");
 
     // Get election details
     console.log("📊 [Results API] Fetching election details...");
-    const electionResult = await db.query(
-      `SELECT election_id, election_name, description, status, start_date, end_date, creator
-       FROM elections WHERE election_id = $1`,
-      [electionId]
-    );
+    const { data: electionData, error: electionError } = await supabaseAuth.supabaseAdmin
+      .from('elections')
+      .select('election_id, election_name, description, status, start_date, end_date, creator')
+      .eq('election_id', electionId)
+      .single();
 
-    if (!electionResult.rows || electionResult.rows.length === 0) {
+    if (electionError || !electionData) {
       console.log("📊 [Results API] ❌ Election not found");
       return NextResponse.json(
         { error: "Election not found" },
@@ -45,7 +37,6 @@ export async function GET(
       );
     }
 
-    const electionData = electionResult.rows[0];
     console.log("📊 [Results API] ✅ Election found:", electionData.election_name, "Status:", electionData.status);
 
     // Check if results should be visible (election ended or user is admin)
@@ -53,20 +44,9 @@ export async function GET(
     const endDate = new Date(electionData.end_date);
     const isElectionEnded = currentTime > endDate;
     
-    // Check if user is admin - query the database directly
-    let isAdmin = false;
-    try {
-      const rolesResult = await db.query(
-        `SELECT role_name FROM user_roles WHERE user_id = $1 AND role_name IN ('Admin', 'SuperAdmin')`,
-        [authUser.userId]
-      );
-      isAdmin = rolesResult.rows && rolesResult.rows.length > 0;
-      console.log("📊 [Results API] User admin status:", isAdmin);
-    } catch (roleError) {
-      console.error("Error checking user roles:", roleError);
-      // Continue without admin privileges if role check fails
-      isAdmin = false;
-    }
+    // Check if user is admin from JWT roles
+    const isAdmin = authUser.roles?.includes("Admin") || authUser.roles?.includes("SuperAdmin") || false;
+    console.log("📊 [Results API] User admin status:", isAdmin);
     
     // Allow access if:
     // 1. User is admin OR
@@ -99,12 +79,13 @@ export async function GET(
     console.log("📊 [Results API] Fetching eligible voters...");
     let totalEligibleVoters = 0;
     try {
-      const eligibleResult = await db.query(
-        `SELECT COUNT(*) as total FROM eligible_voters 
-         WHERE election_id = $1 AND status = 'eligible'`,
-        [electionId]
-      );
-      totalEligibleVoters = parseInt(eligibleResult.rows[0]?.total || '0');
+      const { count } = await supabaseAuth.supabaseAdmin
+        .from('eligible_voters')
+        .select('*', { count: 'exact', head: true })
+        .eq('election_id', electionId)
+        .eq('status', 'eligible');
+      
+      totalEligibleVoters = count || 0;
       console.log("📊 [Results API] ✅ Eligible voters:", totalEligibleVoters);
     } catch (error) {
       console.log("📊 [Results API] ⚠️ Error fetching eligible voters:", error);
@@ -113,11 +94,13 @@ export async function GET(
 
     // Get total votes cast (unique voters)
     console.log("📊 [Results API] Fetching votes cast...");
-    const votesCastResult = await db.query(
-      `SELECT COUNT(DISTINCT voter_id) as total FROM votes WHERE election_id = $1`,
-      [electionId]
-    );
-    const totalVotesCast = parseInt(votesCastResult.rows[0]?.total || '0');
+    const { data: votesData } = await supabaseAuth.supabaseAdmin
+      .from('votes')
+      .select('voter_id')
+      .eq('election_id', electionId);
+    
+    const uniqueVoters = new Set(votesData?.map(v => v.voter_id) || []);
+    const totalVotesCast = uniqueVoters.size;
     console.log("📊 [Results API] ✅ Votes cast:", totalVotesCast);
 
     // Calculate turnout percentage
@@ -128,64 +111,61 @@ export async function GET(
 
     // Get contests for this election
     console.log("📊 [Results API] Fetching contests...");
-    const contestsResult = await db.query(
-      `SELECT contest_id as id, contest_title as title, contest_type
-       FROM contests WHERE election_id = $1 ORDER BY contest_id ASC`,
-      [electionId]
-    );
+    const { data: contestsData, error: contestsError } = await supabaseAuth.supabaseAdmin
+      .from('contests')
+      .select('contest_id, contest_title, contest_type')
+      .eq('election_id', electionId)
+      .order('contest_id');
 
-    if (!contestsResult.rows) {
-      console.error("📊 [Results API] ❌ Error fetching contests");
+    if (contestsError) {
+      console.error("📊 [Results API] ❌ Error fetching contests:", contestsError);
       return NextResponse.json(
         { error: "Failed to fetch contests" },
         { status: 500 }
       );
     }
 
-    const contestsData = contestsResult.rows;
-    console.log("📊 [Results API] ✅ Contests found:", contestsData.length);
+    console.log("📊 [Results API] ✅ Contests found:", contestsData?.length || 0);
 
     // Get results for each contest
     console.log("📊 [Results API] Processing contest results...");
     const contests = await Promise.all(
       (contestsData || []).map(async (contest: any) => {
-        console.log(`📊 [Results API] Processing contest: ${contest.title}`);
+        console.log(`📊 [Results API] Processing contest: ${contest.contest_title}`);
+        
         // Get candidates for this contest
-        const candidatesResult = await db.query(
-          `SELECT candidate_id as id, candidate_name as name, party
-           FROM candidates WHERE contest_id = $1 ORDER BY candidate_id ASC`,
-          [contest.id]
-        );
-        const candidatesData = candidatesResult.rows;
+        const { data: candidatesData } = await supabaseAuth.supabaseAdmin
+          .from('candidates')
+          .select('candidate_id, candidate_name, party')
+          .eq('contest_id', contest.contest_id)
+          .order('candidate_id');
 
         // Get vote counts for each candidate
         const candidateResults = await Promise.all(
           (candidatesData || []).map(async (candidate: any) => {
-            const votesResult = await db.query(
-              `SELECT COUNT(*) as count 
-               FROM votes
-               WHERE candidate_id = $1 AND election_id = $2`,
-              [candidate.id, electionId]
-            );
-            const votes = parseInt(votesResult.rows[0]?.count || '0');
+            const { count } = await supabaseAuth.supabaseAdmin
+              .from('votes')
+              .select('*', { count: 'exact', head: true })
+              .eq('candidate_id', candidate.candidate_id)
+              .eq('election_id', electionId);
 
             return {
-              id: candidate.id,
-              name: candidate.name,
+              id: candidate.candidate_id,
+              name: candidate.candidate_name,
               party: candidate.party,
-              votes: votes || 0,
+              votes: count || 0,
             };
           })
         );
 
         // Calculate total votes for this contest
         const totalContestVotes = candidateResults.reduce(
-          (sum, candidate) => sum + candidate.votes,
+          (sum: number, candidate: any) => sum + candidate.votes,
           0
         );
 
         // Calculate percentages and determine winner(s)
-        const candidatesWithPercentages = candidateResults.map((candidate) => ({
+        const candidatesWithPercentages = candidateResults.map((candidate: any) => ({
           ...candidate,
           percentage:
             totalContestVotes > 0
@@ -194,13 +174,13 @@ export async function GET(
         }));
 
         // Sort by votes (descending)
-        candidatesWithPercentages.sort((a, b) => b.votes - a.votes);
+        candidatesWithPercentages.sort((a: any, b: any) => b.votes - a.votes);
 
         // Mark winners (for single-winner contests, just the first; for multi-winner, top N)
         // Default to single winner for all contest types (max_selections = 1)
         const maxVotes = candidatesWithPercentages[0]?.votes || 0;
         const candidatesWithWinners = candidatesWithPercentages.map(
-          (candidate, index) => ({
+          (candidate: any, index: number) => ({
             id: candidate.id,
             name: candidate.name,
             party: candidate.party,
@@ -211,8 +191,8 @@ export async function GET(
         );
 
         return {
-          id: contest.id,
-          title: contest.title,
+          id: contest.contest_id,
+          title: contest.contest_title,
           description: '', // Not available in schema
           contestType: contest.contest_type, // Add contestType for frontend
           totalVotes: totalContestVotes,
