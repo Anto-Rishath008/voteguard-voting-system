@@ -19,12 +19,11 @@ export async function PUT(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Check if user has admin permissions
-    const hasAdminPermission = await DatabaseUtils.checkUserRole(
-      authUser.userId,
-      "Admin"
-    );
-    if (!hasAdminPermission) {
+    // Check if user has admin permissions from JWT
+    const hasAdminPermission = authUser.roles?.includes("Admin") || false;
+    const hasSuperAdminPermission = authUser.roles?.includes("SuperAdmin") || false;
+    
+    if (!hasAdminPermission && !hasSuperAdminPermission) {
       return NextResponse.json(
         { error: "Admin access required" },
         { status: 403 }
@@ -97,12 +96,11 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Check if user has admin permissions
-    const hasAdminPermission = await DatabaseUtils.checkUserRole(
-      authUser.userId,
-      "Admin"
-    );
-    if (!hasAdminPermission) {
+    // Check if user has admin permissions from JWT
+    const hasAdminPermission = authUser.roles?.includes("Admin") || false;
+    const hasSuperAdminPermission = authUser.roles?.includes("SuperAdmin") || false;
+    
+    if (!hasAdminPermission && !hasSuperAdminPermission) {
       return NextResponse.json(
         { error: "Admin access required" },
         { status: 403 }
