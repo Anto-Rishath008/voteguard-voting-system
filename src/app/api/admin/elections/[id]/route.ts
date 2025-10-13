@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDatabase } from "@/lib/enhanced-database";
+import { supabaseAuth } from "@/lib/supabase-auth";
 import { verifyJWT } from "@/lib/auth";
 
 export async function GET(
@@ -16,14 +16,11 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Check if user has admin permissions
-    const db = await getDatabase();
-    const roleResult = await db.query(
-      "SELECT role_name FROM user_roles WHERE user_id = $1 AND role_name IN ('Admin', 'SuperAdmin')",
-      [authUser.userId]
-    );
+    // Check if user has admin permissions from JWT
+    const hasAdminPermission = authUser.roles?.includes("Admin") || false;
+    const hasSuperAdminPermission = authUser.roles?.includes("SuperAdmin") || false;
     
-    if (roleResult.rows.length === 0) {
+    if (!hasAdminPermission && !hasSuperAdminPermission) {
       return NextResponse.json(
         { error: "Admin access required" },
         { status: 403 }
@@ -31,19 +28,18 @@ export async function GET(
     }
 
     // Get election details
-    const electionResult = await db.query(
-      "SELECT * FROM elections WHERE election_id = $1",
-      [electionId]
-    );
+    const { data: electionData, error: electionError } = await supabaseAuth.supabaseAdmin
+      .from('elections')
+      .select('*')
+      .eq('election_id', electionId)
+      .single();
 
-    if (!electionResult.rows || electionResult.rows.length === 0) {
+    if (electionError || !electionData) {
       return NextResponse.json(
         { error: "Election not found" },
         { status: 404 }
       );
     }
-    
-    const electionData = electionResult.rows[0];
 
     const election = {
       id: electionData.election_id,
@@ -80,21 +76,18 @@ export async function PUT(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Check if user has admin permissions
-    const db = await getDatabase();
-    const roleResult = await db.query(
-      "SELECT role_name FROM user_roles WHERE user_id = $1 AND role_name IN ('Admin', 'SuperAdmin')",
-      [authUser.userId]
-    );
+    // Check if user has admin permissions from JWT
+    const hasAdminPermission = authUser.roles?.includes("Admin") || false;
+    const hasSuperAdminPermission = authUser.roles?.includes("SuperAdmin") || false;
     
-    if (roleResult.rows.length === 0) {
+    if (!hasAdminPermission && !hasSuperAdminPermission) {
       return NextResponse.json(
         { error: "Admin access required" },
         { status: 403 }
       );
     }
-    const body = await request.json();
 
+    const body = await request.json();
     const { title, description, startDate, endDate, status } = body;
 
     if (!title || !startDate || !endDate) {
@@ -105,45 +98,44 @@ export async function PUT(
     }
 
     // Update election
-    const updateResult = await db.query(
-      `UPDATE elections SET 
-       election_name = $1, 
-       description = $2, 
-       start_date = $3, 
-       end_date = $4, 
-       status = $5, 
-       updated_at = CURRENT_TIMESTAMP 
-       WHERE election_id = $6 
-       RETURNING *`,
-      [title, description || "", startDate, endDate, status || "Draft", electionId]
-    );
+    const { data: updatedElection, error: updateError } = await supabaseAuth.supabaseAdmin
+      .from('elections')
+      .update({
+        election_name: title,
+        description: description || "",
+        start_date: startDate,
+        end_date: endDate,
+        status: status || "Draft",
+        updated_at: new Date().toISOString()
+      })
+      .eq('election_id', electionId)
+      .select()
+      .single();
 
-    if (updateResult.rows.length === 0) {
-      console.error("Error updating election");
+    if (updateError || !updatedElection) {
+      console.error("Error updating election:", updateError);
       return NextResponse.json(
         { error: "Failed to update election" },
         { status: 500 }
       );
     }
-    const updatedElection = updateResult.rows[0];
 
     // Create audit log
     try {
-      await db.query(
-        `INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details, timestamp)
-         VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
-        [
-          authUser.userId,
-          "UPDATE",
-          "election_update",
-          electionId,
-          JSON.stringify({
+      await supabaseAuth.supabaseAdmin
+        .from('audit_log')
+        .insert([{
+          user_id: authUser.userId,
+          operation_type: "UPDATE",
+          table_name: "elections",
+          record_id: electionId,
+          new_values: {
             election_name: title,
             status: status,
             updated_fields: Object.keys(body),
-          })
-        ]
-      );
+          },
+          timestamp: new Date().toISOString()
+        }]);
     } catch (auditError) {
       console.error("Error creating audit log:", auditError);
     }
@@ -182,14 +174,11 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Check if user has admin permissions
-    const db = await getDatabase();
-    const roleResult = await db.query(
-      "SELECT role_name FROM user_roles WHERE user_id = $1 AND role_name IN ('Admin', 'SuperAdmin')",
-      [authUser.userId]
-    );
+    // Check if user has admin permissions from JWT
+    const hasAdminPermission = authUser.roles?.includes("Admin") || false;
+    const hasSuperAdminPermission = authUser.roles?.includes("SuperAdmin") || false;
     
-    if (roleResult.rows.length === 0) {
+    if (!hasAdminPermission && !hasSuperAdminPermission) {
       return NextResponse.json(
         { error: "Admin access required" },
         { status: 403 }
@@ -197,27 +186,27 @@ export async function DELETE(
     }
 
     // Check if election exists
-    const existingElectionResult = await db.query(
-      "SELECT election_name FROM elections WHERE election_id = $1",
-      [electionId]
-    );
+    const { data: existingElection, error: fetchError } = await supabaseAuth.supabaseAdmin
+      .from('elections')
+      .select('election_name')
+      .eq('election_id', electionId)
+      .single();
 
-    if (existingElectionResult.rows.length === 0) {
+    if (fetchError || !existingElection) {
       return NextResponse.json(
         { error: "Election not found" },
         { status: 404 }
       );
     }
-    const existingElection = existingElectionResult.rows[0];
 
     // Delete election (this will cascade to related records)
-    const deleteResult = await db.query(
-      "DELETE FROM elections WHERE election_id = $1",
-      [electionId]
-    );
+    const { error: deleteError } = await supabaseAuth.supabaseAdmin
+      .from('elections')
+      .delete()
+      .eq('election_id', electionId);
 
-    if (deleteResult.rowCount === 0) {
-      console.error("Error deleting election");
+    if (deleteError) {
+      console.error("Error deleting election:", deleteError);
       return NextResponse.json(
         { error: "Failed to delete election" },
         { status: 500 }
@@ -226,17 +215,16 @@ export async function DELETE(
 
     // Create audit log
     try {
-      await db.query(
-        `INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details, timestamp)
-         VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
-        [
-          authUser.userId,
-          "DELETE",
-          "election_delete",
-          electionId,
-          JSON.stringify({ election_name: existingElection.election_name })
-        ]
-      );
+      await supabaseAuth.supabaseAdmin
+        .from('audit_log')
+        .insert([{
+          user_id: authUser.userId,
+          operation_type: "DELETE",
+          table_name: "elections",
+          record_id: electionId,
+          old_values: { election_name: existingElection.election_name },
+          timestamp: new Date().toISOString()
+        }]);
     } catch (auditError) {
       console.error("Error creating audit log:", auditError);
     }

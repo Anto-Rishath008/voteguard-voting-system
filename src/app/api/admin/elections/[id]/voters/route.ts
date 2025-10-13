@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyJWT } from "@/lib/auth";
-import { getDatabase } from "@/lib/enhanced-database";
+import { supabaseAuth } from "@/lib/supabase-auth";
 
 // GET /api/admin/elections/[id]/voters - Get eligible voters for an election
 export async function GET(
@@ -17,15 +17,11 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const db = getDatabase();
+    // Check if user has admin permissions from JWT
+    const hasAdminPermission = authUser.roles?.includes("Admin") || false;
+    const hasSuperAdminPermission = authUser.roles?.includes("SuperAdmin") || false;
     
-    // Check if user has admin permissions
-    const roleResult = await db.query(
-      "SELECT role_name FROM user_roles WHERE user_id = $1 AND role_name IN ('Admin', 'SuperAdmin')",
-      [authUser.userId]
-    );
-    
-    if (roleResult.rows.length === 0) {
+    if (!hasAdminPermission && !hasSuperAdminPermission) {
       return NextResponse.json(
         { error: "Admin access required" },
         { status: 403 }
@@ -33,12 +29,13 @@ export async function GET(
     }
 
     // Get election details
-    const electionResult = await db.query(
-      "SELECT election_name, status FROM elections WHERE election_id = $1",
-      [electionId]
-    );
+    const { data: election, error: electionError } = await supabaseAuth.supabaseAdmin
+      .from('elections')
+      .select('election_name, status')
+      .eq('election_id', electionId)
+      .single();
 
-    if (electionResult.rows.length === 0) {
+    if (electionError || !election) {
       return NextResponse.json(
         { error: "Election not found" },
         { status: 404 }
@@ -46,52 +43,78 @@ export async function GET(
     }
 
     // Get eligible voters
-    const eligibleVoters = await db.query(`
-      SELECT 
-        ev.id,
-        ev.user_id,
-        ev.status,
-        ev.added_at,
-        u.first_name,
-        u.last_name,
-        u.email,
-        CASE WHEN v.voter_id IS NOT NULL THEN true ELSE false END as has_voted
-      FROM eligible_voters ev
-      JOIN users u ON ev.user_id = u.user_id
-      LEFT JOIN votes v ON v.voter_id = ev.user_id AND v.election_id = ev.election_id
-      WHERE ev.election_id = $1
-      ORDER BY u.first_name, u.last_name
-    `, [electionId]);
+    const { data: eligibleVoters, error: eligibleError } = await supabaseAuth.supabaseAdmin
+      .from('eligible_voters')
+      .select(`
+        id,
+        user_id,
+        status,
+        added_at,
+        users (
+          first_name,
+          last_name,
+          email
+        )
+      `)
+      .eq('election_id', electionId);
+
+    if (eligibleError) {
+      console.error("Error fetching eligible voters:", eligibleError);
+      throw eligibleError;
+    }
+
+    // Check who has voted
+    const { data: votes } = await supabaseAuth.supabaseAdmin
+      .from('votes')
+      .select('voter_id')
+      .eq('election_id', electionId);
+
+    const votedUserIds = new Set(votes?.map(v => v.voter_id) || []);
+
+    // Format eligible voters
+    const formattedEligible = (eligibleVoters || []).map((ev: any) => ({
+      id: ev.id,
+      user_id: ev.user_id,
+      status: ev.status,
+      added_at: ev.added_at,
+      first_name: ev.users?.first_name,
+      last_name: ev.users?.last_name,
+      email: ev.users?.email,
+      has_voted: votedUserIds.has(ev.user_id)
+    }));
 
     // Get all voters (users with Voter role) for adding new eligible voters
-    const allVoters = await db.query(`
-      SELECT 
-        u.user_id,
-        u.first_name,
-        u.last_name,
-        u.email,
-        CASE WHEN ev.user_id IS NOT NULL THEN true ELSE false END as is_eligible
-      FROM users u
-      JOIN user_roles ur ON u.user_id = ur.user_id
-      LEFT JOIN eligible_voters ev ON ev.user_id = u.user_id AND ev.election_id = $1
-      WHERE ur.role_name = 'Voter'
-      ORDER BY u.first_name, u.last_name
-    `, [electionId]);
+    const { data: allVoterRoles } = await supabaseAuth.supabaseAdmin
+      .from('user_roles')
+      .select(`
+        user_id,
+        users (
+          user_id,
+          first_name,
+          last_name,
+          email
+        )
+      `)
+      .eq('role_name', 'Voter');
+
+    const eligibleUserIds = new Set(eligibleVoters?.map((ev: any) => ev.user_id) || []);
+
+    const allVoters = (allVoterRoles || []).map((role: any) => ({
+      user_id: role.users?.user_id,
+      first_name: role.users?.first_name,
+      last_name: role.users?.last_name,
+      email: role.users?.email,
+      is_eligible: eligibleUserIds.has(role.users?.user_id)
+    }));
 
     return NextResponse.json({
-      election: electionResult.rows[0],
-      eligibleVoters: eligibleVoters.rows,
-      allVoters: allVoters.rows
+      election,
+      eligibleVoters: formattedEligible,
+      allVoters
     });
 
   } catch (error: any) {
     console.error("Get eligible voters error:", error);
-    console.error("Error details:", {
-      message: error.message,
-      code: error.code,
-      detail: error.detail,
-      stack: error.stack
-    });
     return NextResponse.json(
       { 
         error: "Internal server error",
@@ -118,15 +141,11 @@ export async function POST(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const db = getDatabase();
+    // Check if user has admin permissions from JWT
+    const hasAdminPermission = authUser.roles?.includes("Admin") || false;
+    const hasSuperAdminPermission = authUser.roles?.includes("SuperAdmin") || false;
     
-    // Check if user has admin permissions
-    const roleResult = await db.query(
-      "SELECT role_name FROM user_roles WHERE user_id = $1 AND role_name IN ('Admin', 'SuperAdmin')",
-      [authUser.userId]
-    );
-    
-    if (roleResult.rows.length === 0) {
+    if (!hasAdminPermission && !hasSuperAdminPermission) {
       return NextResponse.json(
         { error: "Admin access required" },
         { status: 403 }
@@ -134,22 +153,27 @@ export async function POST(
     }
 
     // Add eligible voter
-    await db.query(`
-      INSERT INTO eligible_voters (election_id, user_id, added_by, status)
-      VALUES ($1, $2, $3, 'eligible')
-      ON CONFLICT (election_id, user_id) 
-      DO UPDATE SET status = 'eligible', added_by = $3, added_at = CURRENT_TIMESTAMP
-    `, [electionId, userId, authUser.userId]);
+    const { error: insertError } = await supabaseAuth.supabaseAdmin
+      .from('eligible_voters')
+      .upsert({
+        election_id: electionId,
+        user_id: userId,
+        added_by: authUser.userId,
+        status: 'eligible',
+        added_at: new Date().toISOString()
+      }, {
+        onConflict: 'election_id,user_id'
+      });
+
+    if (insertError) {
+      console.error("Error adding eligible voter:", insertError);
+      throw insertError;
+    }
 
     return NextResponse.json({ success: true });
 
   } catch (error: any) {
     console.error("Add eligible voter error:", error);
-    console.error("Error details:", {
-      message: error.message,
-      code: error.code,
-      detail: error.detail
-    });
     return NextResponse.json(
       { 
         error: "Internal server error",
@@ -184,15 +208,11 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const db = getDatabase();
+    // Check if user has admin permissions from JWT
+    const hasAdminPermission = authUser.roles?.includes("Admin") || false;
+    const hasSuperAdminPermission = authUser.roles?.includes("SuperAdmin") || false;
     
-    // Check if user has admin permissions
-    const roleResult = await db.query(
-      "SELECT role_name FROM user_roles WHERE user_id = $1 AND role_name IN ('Admin', 'SuperAdmin')",
-      [authUser.userId]
-    );
-    
-    if (roleResult.rows.length === 0) {
+    if (!hasAdminPermission && !hasSuperAdminPermission) {
       return NextResponse.json(
         { error: "Admin access required" },
         { status: 403 }
@@ -200,12 +220,13 @@ export async function DELETE(
     }
 
     // Check if voter has already voted
-    const voteCheck = await db.query(
-      "SELECT vote_id FROM votes WHERE voter_id = $1 AND election_id = $2",
-      [userId, electionId]
-    );
+    const { data: votes } = await supabaseAuth.supabaseAdmin
+      .from('votes')
+      .select('vote_id')
+      .eq('voter_id', userId)
+      .eq('election_id', electionId);
 
-    if (voteCheck.rows.length > 0) {
+    if (votes && votes.length > 0) {
       return NextResponse.json(
         { error: "Cannot remove voter who has already voted" },
         { status: 400 }
@@ -213,10 +234,16 @@ export async function DELETE(
     }
 
     // Remove eligible voter
-    await db.query(
-      "DELETE FROM eligible_voters WHERE election_id = $1 AND user_id = $2",
-      [electionId, userId]
-    );
+    const { error: deleteError } = await supabaseAuth.supabaseAdmin
+      .from('eligible_voters')
+      .delete()
+      .eq('election_id', electionId)
+      .eq('user_id', userId);
+
+    if (deleteError) {
+      console.error("Error removing eligible voter:", deleteError);
+      throw deleteError;
+    }
 
     return NextResponse.json({ success: true });
 
