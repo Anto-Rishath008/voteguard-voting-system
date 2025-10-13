@@ -137,12 +137,12 @@ export async function middleware(request: NextRequest) {
     console.log(`🔒 User roles: ${userRoles.join(', ')} for route: ${pathname}`);
 
     // Special handling: Redirect SuperAdmin users away from regular admin pages to SuperAdmin equivalents
-    console.log(`🔒 DEBUG - Checking SuperAdmin redirect: hasToken=${!!token}, isSuperAdmin=${userRoles.includes("SuperAdmin")}, isAdminPath=${pathname.startsWith("/admin")}, isNotAPI=${!pathname.startsWith("/admin/api")}`);
+    // ONLY if explicitly accessing /admin root, not sub-pages
+    console.log(`🔒 DEBUG - Checking SuperAdmin redirect: hasToken=${!!token}, isSuperAdmin=${userRoles.includes("SuperAdmin")}, isExactAdminPath=${pathname === "/admin"}`);
     
-    if (userRoles.includes("SuperAdmin") && pathname.startsWith("/admin") && !pathname.startsWith("/admin/api")) {
-      const superAdminEquivalent = pathname.replace("/admin", "/superadmin");
-      console.log(`🚀 REDIRECTING SuperAdmin from ${pathname} to ${superAdminEquivalent}`);
-      return NextResponse.redirect(new URL(superAdminEquivalent, request.url));
+    if (userRoles.includes("SuperAdmin") && pathname === "/admin") {
+      console.log(`🚀 REDIRECTING SuperAdmin from ${pathname} to /superadmin`);
+      return NextResponse.redirect(new URL("/superadmin", request.url));
     }
 
     // Special handling: Prevent regular Admin users from accessing SuperAdmin pages

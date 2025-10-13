@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VoteGuard - Project Synopsis</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 2cm;
+        }
+        
+        body {
+            font-family: 'Times New Roman', Times, serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 210mm;
+            margin: 0 auto;
+            padding: 20px;
+            background: white;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #1a1a1a;
+            font-size: 24pt;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        h2 {
+            text-align: center;
+            color: #444;
+            font-size: 16pt;
+            margin-top: 0;
+            margin-bottom: 20px;
+            font-weight: normal;
+        }
+        
+        hr {
+            border: none;
+            border-top: 2px solid #333;
+            margin: 20px 0;
+        }
+        
+        .section {
+            margin-bottom: 20px;
+        }
+        
+        .section-title {
+            font-weight: bold;
+            font-size: 14pt;
+            margin-bottom: 10px;
+            color: #1a1a1a;
+        }
+        
+        .group-info {
+            margin-bottom: 10px;
+        }
+        
+        .members-list {
+            list-style-type: none;
+            padding-left: 0;
+            margin: 10px 0;
+        }
+        
+        .members-list li {
+            margin: 5px 0;
+            font-size: 12pt;
+        }
+        
+        .objective {
+            text-align: justify;
+            font-size: 12pt;
+            line-height: 1.8;
+        }
+        
+        .tech-list {
+            margin: 10px 0;
+            padding-left: 0;
+            list-style-type: none;
+        }
+        
+        .tech-list li {
+            margin: 5px 0;
+            font-size: 11pt;
+        }
+        
+        .footer {
+            margin-top: 30px;
+            padding-top: 15px;
+            border-top: 1px solid #ccc;
+        }
+        
+        .footer-item {
+            margin: 5px 0;
+            font-size: 11pt;
+        }
+        
+        strong {
+            font-weight: bold;
+        }
+        
+        @media print {
+            body {
+                margin: 0;
+                padding: 15mm;
+            }
+            
+            .no-print {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>VoteGuard - Enterprise Voting System</h1>
+    <h2>Cloud Computing Project Synopsis</h2>
+    
+    <hr>
+    
+    <div class="section">
+        <div class="section-title">Group Number: B-19</div>
+    </div>
+    
+    <div class="section">
+        <div class="section-title">Group Members:</div>
+        <ul class="members-list">
+            <li>1. <strong>CB.SC.U4AIE23103</strong></li>
+            <li>2. <strong>CB.SC.U4AIE23107</strong></li>
+            <li>3. <strong>CB.SC.U4AIE23161</strong></li>
+        </ul>
+    </div>
+    
+    <hr>
+    
+    <div class="section">
+        <div class="section-title">Project Objective</div>
+        
+        <div class="objective">
+            <p>
+                This project presents <strong>VoteGuard</strong>, a comprehensive enterprise-grade cloud-based voting system designed to demonstrate advanced cloud computing concepts, database management, and secure web application development. The primary objective is to develop a scalable, secure, and transparent electronic voting platform that ensures data integrity, voter privacy, and real-time election management.
+            </p>
+            
+            <p>
+                The system implements <strong>role-based access control</strong> (Voters, Admins, Super Admins), <strong>end-to-end encryption</strong> for vote security, and <strong>comprehensive audit logging</strong> for transparency and compliance. Built on modern cloud architecture using <strong>Supabase</strong> (PostgreSQL as a Service), the platform showcases cloud-native features including real-time subscriptions, row-level security, auto-scaling, and serverless functions. The application is deployed on <strong>Vercel</strong>, leveraging edge functions, automatic deployments, and global CDN distribution.
+            </p>
+            
+            <p>
+                Key features include real-time election analytics, multi-factor authentication, security monitoring with threat detection, and advanced reporting capabilities. The system adheres to <strong>ACID compliance</strong> principles, implements <strong>3NF normalization</strong>, and utilizes stored procedures, triggers, and optimized indexing strategies for performance.
+            </p>
+            
+            <p><strong>Technologies Used:</strong></p>
+            <ul class="tech-list">
+                <li><strong>Frontend:</strong> Next.js 15, React 19, TypeScript, Tailwind CSS</li>
+                <li><strong>Backend:</strong> Next.js API Routes, JWT authentication, bcrypt encryption</li>
+                <li><strong>Database:</strong> Supabase (PostgreSQL) with pgcrypto extension, real-time capabilities</li>
+                <li><strong>Cloud Platform:</strong> Vercel (hosting, edge functions, CI/CD), Supabase (database, authentication, storage)</li>
+                <li><strong>Additional Tools:</strong> Lucide React (icons), Nodemailer (email), Twilio (SMS), UUID generation</li>
+                <li><strong>Security:</strong> Multi-layered encryption, SQL injection prevention, XSS protection, CSRF tokens, Row-Level Security (RLS)</li>
+            </ul>
+            
+            <p>
+                The project successfully demonstrates cloud deployment, scalability, security best practices, and professional software engineering principles suitable for real-world enterprise applications.
+            </p>
+        </div>
+    </div>
+    
+    <hr>
+    
+    <div class="footer">
+        <div class="footer-item"><strong>Project Repository:</strong> voteguard-voting-system</div>
+        <div class="footer-item"><strong>Deployment Status:</strong> Production-ready with Supabase + Vercel cloud infrastructure</div>
+        <div class="footer-item"><strong>Date:</strong> October 2025</div>
+    </div>
+    
+    <div class="no-print" style="margin-top: 30px; padding: 20px; background: #f0f0f0; border-radius: 5px;">
+        <p><strong>To save as PDF:</strong></p>
+        <ul>
+            <li>Press <kbd>Ctrl+P</kbd> (Windows) or <kbd>Cmd+P</kbd> (Mac)</li>
+            <li>Select "Save as PDF" as the printer</li>
+            <li>Click "Save"</li>
+        </ul>
+    </div>
+</body>
+</html>

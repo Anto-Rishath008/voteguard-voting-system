@@ -78,6 +78,7 @@ export async function GET(request: NextRequest) {
     console.log("User roles:", userRoles);
 
     return NextResponse.json({
+      success: true,
       user: {
         userId: userData.user_id,
         email: userData.email,

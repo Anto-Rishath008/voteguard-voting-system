@@ -1,46 +1,63 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyJWT } from "@/lib/auth";
-import { getDatabase } from "@/lib/database";
+import { supabaseAuth } from "@/lib/supabase-auth";
 
-// Helper function to check user role
+// CORS headers helper
+function getCorsHeaders() {
+  return {
+    'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Allow-Methods': 'GET,OPTIONS,PATCH,DELETE,POST,PUT',
+    'Access-Control-Allow-Headers': 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization, Cookie',
+  };
+}
+
+// Handle OPTIONS request for CORS preflight
+export async function OPTIONS(request: NextRequest) {
+  return NextResponse.json({}, { headers: getCorsHeaders() });
+}
+
+// Helper function to check user role using Supabase
 async function checkUserRole(userId: string, requiredRole: string): Promise<boolean> {
-  const db = getDatabase();
   try {
+    console.log(`🔍 checkUserRole - Checking if user ${userId} has role: ${requiredRole}`);
+    
     // First, let's see what roles this user has
-    const userRoles = await db.query(
-      `SELECT role_name FROM user_roles WHERE user_id = $1`,
-      [userId]
-    );
-    console.log(`User ${userId} has roles:`, userRoles.rows.map((r: any) => r.role_name));
-    console.log(`Checking for role: ${requiredRole}`);
+    const { data: userRoles, error: rolesError } = await supabaseAuth.supabaseAdmin
+      .from('user_roles')
+      .select('role_name')
+      .eq('user_id', userId);
+    
+    if (rolesError) {
+      console.error("❌ Error fetching user roles:", rolesError);
+      return false;
+    }
+    
+    console.log(`👤 User ${userId} has ${userRoles?.length || 0} role(s):`, userRoles?.map((r: any) => r.role_name));
     
     // Check for the exact role (case-insensitive)
-    const result = await db.query(
-      `SELECT user_id FROM user_roles 
-       WHERE user_id = $1 AND LOWER(role_name) = LOWER($2)`,
-      [userId, requiredRole]
-    );
-    
-    const hasRole = result.rows.length > 0;
-    console.log(`User has ${requiredRole} role:`, hasRole);
+    const hasRole = userRoles?.some((r: any) => r.role_name.toLowerCase() === requiredRole.toLowerCase()) || false;
+    console.log(`✅ User has ${requiredRole} role:`, hasRole ? 'YES' : 'NO');
     return hasRole;
   } catch (error) {
-    console.error("Error checking user role:", error);
+    console.error("❌ Error checking user role:", error);
     return false;
   }
 }
 
 // Helper function to log audit events
 async function logAudit(userId: string, action: string, resourceType: string, resourceId: string, details: any) {
-  const db = getDatabase();
   try {
     // Note: Table is 'audit_log' (singular), not 'audit_logs'
     // Schema uses: operation_type, table_name, record_id, new_values
-    await db.query(
-      `INSERT INTO audit_log (user_id, operation_type, table_name, record_id, new_values)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [userId, action, resourceType, resourceId, JSON.stringify(details)]
-    );
+    await supabaseAuth.supabaseAdmin
+      .from('audit_log')
+      .insert({
+        user_id: userId,
+        operation_type: action,
+        table_name: resourceType,
+        record_id: resourceId,
+        new_values: details
+      });
   } catch (error) {
     console.error("Error logging audit event:", error);
   }
@@ -52,30 +69,54 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const db = getDatabase();
   
   try {
+    // Enhanced debugging for production
+    const cookies = request.cookies.getAll();
+    console.log("🍪 All cookies:", cookies.map(c => ({ name: c.name, hasValue: !!c.value })));
+    
     // Verify user authentication
     const { user: authUser, error: authError } = verifyJWT(request);
-    console.log("DELETE - Auth check:", { authUser: authUser?.userId, error: authError });
+    console.log("🔍 DELETE - Auth check:", { 
+      hasUser: !!authUser, 
+      userId: authUser?.userId, 
+      email: authUser?.email,
+      rolesFromJWT: authUser?.roles,
+      error: authError 
+    });
     
     if (authError || !authUser) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      console.log("❌ DELETE - No auth user, returning 401");
+      console.log("❌ Auth error details:", authError);
+      return NextResponse.json({ error: "Unauthorized", details: authError }, { status: 401 });
     }
 
-    // Check if user has admin or superadmin permissions
-    const hasAdminPermission = await checkUserRole(authUser.userId, "Admin");
-    const hasSuperAdminPermission = await checkUserRole(authUser.userId, "SuperAdmin");
+    // Debug: Check roles from JWT first
+    console.log("🔑 Roles from JWT token:", authUser.roles);
+
+    // Check if user has admin or superadmin permissions from JWT
+    // No need to query database again since JWT already has roles
+    const hasAdminPermission = authUser.roles?.includes("Admin") || false;
+    const hasSuperAdminPermission = authUser.roles?.includes("SuperAdmin") || false;
     
-    console.log("DELETE - Permission check:", { hasAdminPermission, hasSuperAdminPermission });
+    console.log("🎭 DELETE - Permission check results:", { 
+      hasAdminPermission, 
+      hasSuperAdminPermission,
+      userId: authUser.userId,
+      email: authUser.email
+    });
     
     if (!hasAdminPermission && !hasSuperAdminPermission) {
-      console.log("DELETE - Access denied for user:", authUser.userId);
+      console.log("❌ DELETE - Access denied for user:", authUser.userId);
+      console.log("❌ This user needs either Admin or SuperAdmin role");
+      console.log("❌ Current roles:", authUser.roles);
       return NextResponse.json(
-        { error: "Admin or SuperAdmin access required" },
+        { error: "Admin or SuperAdmin access required", userRoles: authUser.roles },
         { status: 403 }
       );
     }
+    
+    console.log("✅ DELETE - Permission granted, proceeding with deletion");
 
     const userId = id;
     if (!userId) {
@@ -86,16 +127,17 @@ export async function DELETE(
     }
 
     // Check if user exists
-    const existingUser = await db.query(
-      `SELECT user_id, email FROM users WHERE user_id = $1`,
-      [userId]
-    );
+    const { data: existingUser, error: userError } = await supabaseAuth.supabaseAdmin
+      .from('users')
+      .select('user_id, email')
+      .eq('user_id', userId)
+      .single();
 
-    if (!existingUser.rows || existingUser.rows.length === 0) {
+    if (userError || !existingUser) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    const user = existingUser.rows[0];
+    const user = existingUser;
 
     // Prevent deletion of current user
     if (user.user_id === authUser.userId) {
@@ -106,12 +148,12 @@ export async function DELETE(
     }
 
     // Check the target user's role(s)
-    const targetUserRoles = await db.query(
-      `SELECT role_name FROM user_roles WHERE user_id = $1`,
-      [userId]
-    );
+    const { data: targetUserRoles, error: rolesError } = await supabaseAuth.supabaseAdmin
+      .from('user_roles')
+      .select('role_name')
+      .eq('user_id', userId);
 
-    const targetRoles = targetUserRoles.rows.map((r: any) => r.role_name.toLowerCase());
+    const targetRoles = (targetUserRoles || []).map((r: any) => r.role_name.toLowerCase());
     console.log(`Target user ${user.email} has roles:`, targetRoles);
 
     // Check if target user is a SuperAdmin or Admin
@@ -135,115 +177,42 @@ export async function DELETE(
     console.log(`🗑️  Starting cascading delete for user: ${user.email}`);
 
     // Delete all foreign key references before deleting the user
-    // Order matters: delete from child tables first
+    // Using Supabase, which handles cascading deletes automatically
     
-    // 1. Delete from security_events (references user_sessions and users)
-    try {
-      const securityEventsResult = await db.query(
-        `DELETE FROM security_events WHERE user_id = $1`,
-        [userId]
-      );
-      console.log(`   Deleted ${securityEventsResult.rowCount || 0} security_events`);
-    } catch (error: any) {
-      if (error.code === '42P01') {
-        console.log(`   Table security_events does not exist, skipping`);
-      } else {
-        throw error;
-      }
+    // Delete user_roles first
+    const { error: rolesDeleteError } = await supabaseAuth.supabaseAdmin
+      .from('user_roles')
+      .delete()
+      .eq('user_id', userId);
+    
+    if (rolesDeleteError) {
+      console.log(`   Error deleting user_roles:`, rolesDeleteError);
+    } else {
+      console.log(`   Deleted user_roles for user`);
     }
 
-    // 2. Delete from anomaly_detections (references user_sessions and users) - if exists
-    try {
-      const anomalyResult = await db.query(
-        `DELETE FROM anomaly_detections WHERE affected_user_id = $1`,
-        [userId]
-      );
-      console.log(`   Deleted ${anomalyResult.rowCount || 0} anomaly_detections`);
-    } catch (error: any) {
-      if (error.code === '42P01') {
-        console.log(`   Table anomaly_detections does not exist, skipping`);
-      } else {
-        throw error;
-      }
+    // Delete user_sessions
+    const { error: sessionsDeleteError } = await supabaseAuth.supabaseAdmin
+      .from('user_sessions')
+      .delete()
+      .eq('user_id', userId);
+    
+    if (sessionsDeleteError) {
+      console.log(`   Error deleting user_sessions:`, sessionsDeleteError);
+    } else {
+      console.log(`   Deleted user_sessions for user`);
     }
 
-    // 3. Delete from verification_tokens - if exists
-    try {
-      const tokensResult = await db.query(
-        `DELETE FROM verification_tokens WHERE user_id = $1`,
-        [userId]
-      );
-      console.log(`   Deleted ${tokensResult.rowCount || 0} verification_tokens`);
-    } catch (error: any) {
-      if (error.code === '42P01') {
-        console.log(`   Table verification_tokens does not exist, skipping`);
-      } else {
-        throw error;
-      }
-    }
+    // Finally, delete the user (Supabase will handle remaining cascades)
+    const { error: deleteError } = await supabaseAuth.supabaseAdmin
+      .from('users')
+      .delete()
+      .eq('user_id', userId);
 
-    // 4. Delete from eligible_voters
-    const eligibleResult = await db.query(
-      `DELETE FROM eligible_voters WHERE user_id = $1 OR added_by = $1`,
-      [userId]
-    );
-    console.log(`   Deleted ${eligibleResult.rowCount || 0} eligible_voters`);
-
-    // 5. Delete from votes (if any - though this might be restricted for audit purposes)
-    // Note: You may want to keep votes for audit trail, so commented out
-    // const votesResult = await db.query(
-    //   `DELETE FROM votes WHERE voter_id = $1`,
-    //   [userId]
-    // );
-    // console.log(`   Deleted ${votesResult.rowCount || 0} votes`);
-
-    // 6. Delete from user_sessions
-    const sessionsResult = await db.query(
-      `DELETE FROM user_sessions WHERE user_id = $1`,
-      [userId]
-    );
-    console.log(`   Deleted ${sessionsResult.rowCount || 0} user_sessions`);
-
-    // 7. Delete from audit_log (references user_id)
-    const auditResult = await db.query(
-      `DELETE FROM audit_log WHERE user_id = $1`,
-      [userId]
-    );
-    console.log(`   Deleted ${auditResult.rowCount || 0} audit_log entries`);
-
-    // 8. Handle elections created by this user
-    // We need to either delete them or reassign them
-    // For safety, we'll reassign to the current admin user
-    const electionsResult = await db.query(
-      `UPDATE elections SET creator = $1 WHERE creator = $2`,
-      [authUser.userId, userId]
-    );
-    console.log(`   Reassigned ${electionsResult.rowCount || 0} elections to current admin`);
-
-    // 9. Delete user_roles where this user assigned roles (assigned_by)
-    const assignedRolesResult = await db.query(
-      `UPDATE user_roles SET assigned_by = NULL WHERE assigned_by = $1`,
-      [userId]
-    );
-    console.log(`   Nullified ${assignedRolesResult.rowCount || 0} role assignments`);
-
-    // 10. Delete from user_roles
-    const rolesResult = await db.query(
-      `DELETE FROM user_roles WHERE user_id = $1`,
-      [userId]
-    );
-    console.log(`   Deleted ${rolesResult.rowCount || 0} user_roles`);
-
-    // 11. Finally, delete the user
-    const deleteResult = await db.query(
-      `DELETE FROM users WHERE user_id = $1`,
-      [userId]
-    );
-    console.log(`   Deleted ${deleteResult.rowCount || 0} user(s)`);
-
-    if (deleteResult.rowCount === 0) {
+    if (deleteError) {
+      console.error(`❌ Failed to delete user:`, deleteError);
       return NextResponse.json(
-        { error: "Failed to delete user" },
+        { error: "Failed to delete user: " + deleteError.message },
         { status: 500 }
       );
     }
@@ -297,9 +266,9 @@ export async function PATCH(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Check if user has admin or superadmin permissions
-    const hasAdminPermission = await checkUserRole(authUser.userId, "Admin");
-    const hasSuperAdminPermission = await checkUserRole(authUser.userId, "SuperAdmin");
+    // Check if user has admin or superadmin permissions from JWT
+    const hasAdminPermission = authUser.roles?.includes("Admin") || false;
+    const hasSuperAdminPermission = authUser.roles?.includes("SuperAdmin") || false;
     
     if (!hasAdminPermission && !hasSuperAdminPermission) {
       return NextResponse.json(
@@ -317,63 +286,98 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { status, first_name, last_name } = body;
-
-    const db = await getDatabase();
+    const { status, first_name, last_name, full_name, email, role } = body;
 
     // Check if user exists
-    const existingUserResult = await db.query(
-      "SELECT user_id, email, status FROM users WHERE user_id = $1",
-      [userId]
-    );
+    const { data: existingUser, error: userError } = await supabaseAuth.supabaseAdmin
+      .from('users')
+      .select('user_id, email, status, full_name')
+      .eq('user_id', userId)
+      .single();
 
-    if (existingUserResult.rows.length === 0) {
+    if (userError || !existingUser) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
-    const existingUser = existingUserResult.rows[0];
 
-    // Build update query dynamically
-    const updateFields = [];
-    const updateValues = [];
-    let paramIndex = 1;
+    // Build update object
+    const updateData: any = {};
     
-    if (status && ["Active", "Inactive", "Suspended"].includes(status)) {
-      updateFields.push(`status = $${paramIndex++}`);
-      updateValues.push(status);
+    if (status && ["active", "inactive", "suspended", "pending", "Active", "Inactive", "Suspended", "Pending"].includes(status)) {
+      updateData.status = status.toLowerCase();
     }
     if (first_name) {
-      updateFields.push(`first_name = $${paramIndex++}`);
-      updateValues.push(first_name);
+      updateData.first_name = first_name;
     }
     if (last_name) {
-      updateFields.push(`last_name = $${paramIndex++}`);
-      updateValues.push(last_name);
+      updateData.last_name = last_name;
+    }
+    if (full_name) {
+      updateData.full_name = full_name;
+    }
+    if (email && email !== existingUser.email) {
+      updateData.email = email;
     }
     
-    if (updateFields.length === 0) {
+    if (Object.keys(updateData).length === 0 && !role) {
       return NextResponse.json(
         { error: "No valid fields to update" },
         { status: 400 }
       );
     }
     
-    updateValues.push(userId);
-    const updateQuery = `UPDATE users SET ${updateFields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE user_id = $${paramIndex} RETURNING *`;
-    
-    const updateResult = await db.query(updateQuery, updateValues);
+    // Update user in users table
+    if (Object.keys(updateData).length > 0) {
+      const { data: updatedUser, error: updateError } = await supabaseAuth.supabaseAdmin
+        .from('users')
+        .update(updateData)
+        .eq('user_id', userId)
+        .select()
+        .single();
 
-    if (updateResult.rows.length === 0) {
-      console.error("Error updating user");
-      return NextResponse.json(
-        { error: "Failed to update user" },
-        { status: 500 }
-      );
+      if (updateError) {
+        console.error("Error updating user:", updateError);
+        return NextResponse.json(
+          { error: "Failed to update user" },
+          { status: 500 }
+        );
+      }
     }
-    const updatedUser = updateResult.rows[0];
+
+    // Update role if provided
+    if (role && hasSuperAdminPermission) {
+      // Delete existing roles
+      await supabaseAuth.supabaseAdmin
+        .from('user_roles')
+        .delete()
+        .eq('user_id', userId);
+
+      // Insert new role
+      const { error: roleError } = await supabaseAuth.supabaseAdmin
+        .from('user_roles')
+        .insert({
+          user_id: userId,
+          role_name: role
+        });
+
+      if (roleError) {
+        console.error("Error updating user role:", roleError);
+        return NextResponse.json(
+          { error: "Failed to update user role" },
+          { status: 500 }
+        );
+      }
+    }
+
+    // Log audit
+    await logAudit(authUser.userId, "UPDATE", "users", userId, {
+      updatedFields: updateData,
+      updatedRole: role,
+      updatedBy: authUser.email
+    });
 
     return NextResponse.json({ 
       message: "User updated successfully",
-      user: updatedUser
+      user: { ...existingUser, ...updateData }
     });
 
   } catch (error) {
@@ -397,9 +401,9 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Check if user has admin or superadmin permissions
-    const hasAdminPermission = await checkUserRole(authUser.userId, "Admin");
-    const hasSuperAdminPermission = await checkUserRole(authUser.userId, "SuperAdmin");
+    // Check if user has admin or superadmin permissions from JWT
+    const hasAdminPermission = authUser.roles?.includes("Admin") || false;
+    const hasSuperAdminPermission = authUser.roles?.includes("SuperAdmin") || false;
     
     if (!hasAdminPermission && !hasSuperAdminPermission) {
       return NextResponse.json(
@@ -416,30 +420,27 @@ export async function GET(
       );
     }
 
-    const db = await getDatabase();
-
     // Get user details
-    const userResult = await db.query(
-      `SELECT user_id, email, first_name, last_name, status, last_login, created_at 
-       FROM users WHERE user_id = $1`,
-      [userId]
-    );
+    const { data: userData, error: userError } = await supabaseAuth.supabaseAdmin
+      .from('users')
+      .select('user_id, email, first_name, last_name, status, last_login, created_at')
+      .eq('user_id', userId)
+      .single();
 
-    if (userResult.rows.length === 0) {
+    if (userError || !userData) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
-    const userData = userResult.rows[0];
 
     // Get user roles
-    const rolesResult = await db.query(
-      `SELECT role_name FROM user_roles WHERE user_id = $1`,
-      [userId]
-    );
+    const { data: rolesData, error: rolesError } = await supabaseAuth.supabaseAdmin
+      .from('user_roles')
+      .select('role_name')
+      .eq('user_id', userId);
 
     // Combine user data with roles
     const user = {
       ...userData,
-      roles: rolesResult.rows.map((role: any) => role.role_name),
+      roles: rolesData?.map((role: any) => role.role_name) || [],
     };
 
     return NextResponse.json({ user });

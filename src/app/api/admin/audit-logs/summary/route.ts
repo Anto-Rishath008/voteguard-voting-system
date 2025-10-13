@@ -40,23 +40,23 @@ export async function GET(request: NextRequest) {
     try {
       // Get total logs count
       const { count: totalLogs } = await supabaseAuth.supabaseAdmin
-        .from('audit_logs')
+        .from('audit_log')
         .select('*', { count: 'exact', head: true });
 
       // Get logs by action type
       const { data: actionStats } = await supabaseAuth.supabaseAdmin
-        .from('audit_logs')
-        .select('action');
+        .from('audit_log')
+        .select('operation_type');
 
       // Count by action
       const actionCounts: Record<string, number> = {};
       actionStats?.forEach((log: any) => {
-        actionCounts[log.action] = (actionCounts[log.action] || 0) + 1;
+        actionCounts[log.operation_type] = (actionCounts[log.operation_type] || 0) + 1;
       });
 
       // Get logs by user (top 10)
       const { data: userLogs } = await supabaseAuth.supabaseAdmin
-        .from('audit_logs')
+        .from('audit_log')
         .select(`
           user_id,
           users:user_id (
@@ -97,35 +97,35 @@ export async function GET(request: NextRequest) {
       oneDayAgo.setDate(oneDayAgo.getDate() - 1);
       
       const { count: last24Hours } = await supabaseAuth.supabaseAdmin
-        .from('audit_logs')
+        .from('audit_log')
         .select('*', { count: 'exact', head: true })
-        .gte('created_at', oneDayAgo.toISOString());
+        .gte('timestamp', oneDayAgo.toISOString());
 
       // Get recent activity (last 7 days)
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
       
       const { count: last7Days } = await supabaseAuth.supabaseAdmin
-        .from('audit_logs')
+        .from('audit_log')
         .select('*', { count: 'exact', head: true })
-        .gte('created_at', sevenDaysAgo.toISOString());
+        .gte('timestamp', sevenDaysAgo.toISOString());
 
       // Get date of first and last log
       const { data: firstLog } = await supabaseAuth.supabaseAdmin
-        .from('audit_logs')
-        .select('created_at')
-        .order('created_at', { ascending: true })
+        .from('audit_log')
+        .select('timestamp')
+        .order('timestamp', { ascending: true })
         .limit(1);
 
       const { data: lastLog } = await supabaseAuth.supabaseAdmin
-        .from('audit_logs')
-        .select('created_at')
-        .order('created_at', { ascending: false })
+        .from('audit_log')
+        .select('timestamp')
+        .order('timestamp', { ascending: false })
         .limit(1);
 
       // Get logs by table
       const { data: tableLogs } = await supabaseAuth.supabaseAdmin
-        .from('audit_logs')
+        .from('audit_log')
         .select('table_name');
 
       const tableCounts: Record<string, number> = {};
@@ -145,8 +145,8 @@ export async function GET(request: NextRequest) {
           totalLogs: totalLogs || 0,
           last24Hours: last24Hours || 0,
           last7Days: last7Days || 0,
-          firstLogDate: firstLog?.[0]?.created_at || null,
-          lastLogDate: lastLog?.[0]?.created_at || null,
+          firstLogDate: firstLog?.[0]?.timestamp || null,
+          lastLogDate: lastLog?.[0]?.timestamp || null,
           actionBreakdown: actionCounts,
           topUsers,
           topTables,

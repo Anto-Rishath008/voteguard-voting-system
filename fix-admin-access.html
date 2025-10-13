@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fix Admin Access - Voting System</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            line-height: 1.6;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #d32f2f;
+            border-bottom: 3px solid #d32f2f;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #1976d2;
+            margin-top: 30px;
+        }
+        .step {
+            background: #f9f9f9;
+            padding: 15px;
+            margin: 15px 0;
+            border-left: 4px solid #1976d2;
+            border-radius: 4px;
+        }
+        .warning {
+            background: #fff3cd;
+            border-left-color: #ffc107;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        .success {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        .code-block {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 15px 0;
+        }
+        .button {
+            display: inline-block;
+            background: #1976d2;
+            color: white;
+            padding: 10px 20px;
+            text-decoration: none;
+            border-radius: 4px;
+            margin: 10px 5px 10px 0;
+        }
+        .button:hover {
+            background: #1565c0;
+        }
+        .button.danger {
+            background: #d32f2f;
+        }
+        .button.danger:hover {
+            background: #c62828;
+        }
+        .button.success {
+            background: #28a745;
+        }
+        .button.success:hover {
+            background: #218838;
+        }
+        ol {
+            padding-left: 25px;
+        }
+        ol li {
+            margin: 10px 0;
+        }
+        .checklist {
+            list-style: none;
+            padding-left: 0;
+        }
+        .checklist li:before {
+            content: "☐ ";
+            margin-right: 10px;
+            font-size: 1.2em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚨 Fix Your Admin Access</h1>
+        
+        <div class="warning">
+            <strong>Current Problem:</strong> You're getting "403 Forbidden - Admin or SuperAdmin access required" even though you're logged in.
+        </div>
+
+        <h2>Why This Is Happening</h2>
+        <p>Your account exists and you can log in, but you don't have the <strong>Admin role</strong> in the database. The system creates accounts with the default "Voter" role. Admin roles must be manually assigned.</p>
+
+        <h2>The Solution (5 Minutes)</h2>
+
+        <div class="step">
+            <h3>Step 1: Open Supabase SQL Editor</h3>
+            <ol>
+                <li>Go to <a href="https://supabase.com/dashboard" target="_blank" class="button">Open Supabase Dashboard</a></li>
+                <li>Sign in to your account</li>
+                <li>Select your voting system project</li>
+                <li>Click <strong>"SQL Editor"</strong> in the left sidebar</li>
+                <li>Click <strong>"New Query"</strong> button</li>
+            </ol>
+        </div>
+
+        <div class="step">
+            <h3>Step 2: Find Your User</h3>
+            <p>Copy and paste this SQL into the editor, then click <strong>Run</strong>:</p>
+            <div class="code-block">
+SELECT 
+  u.user_id,
+  u.email,
+  u.first_name || ' ' || u.last_name as name,
+  COALESCE(array_agg(ur.role_name), ARRAY[]::text[]) as current_roles
+FROM users u
+LEFT JOIN user_roles ur ON u.user_id = ur.user_id
+GROUP BY u.user_id, u.email, u.first_name, u.last_name
+ORDER BY u.created_at;
+            </div>
+            <p>Look for YOUR email in the results and check the <code>current_roles</code> column. It probably shows <code>{}</code> (empty) or <code>{Voter}</code>.</p>
+        </div>
+
+        <div class="step">
+            <h3>Step 3: Add Admin Role</h3>
+            <p><strong>Option A - Give admin to first user (easiest):</strong></p>
+            <div class="code-block">
+DO $$
+DECLARE
+  v_user_id uuid;
+  v_email text;
+BEGIN
+  SELECT user_id, email INTO v_user_id, v_email
+  FROM users ORDER BY created_at ASC LIMIT 1;
+  
+  INSERT INTO user_roles (user_id, role_name, assigned_at)
+  VALUES (v_user_id, 'Admin', CURRENT_TIMESTAMP)
+  ON CONFLICT (user_id, role_name) DO NOTHING;
+  
+  RAISE NOTICE '✅ Admin role added to: %', v_email;
+END $$;
+            </div>
+            
+            <p><strong>Option B - Use your specific email:</strong></p>
+            <div class="code-block">
+DO $$
+DECLARE
+  v_user_id uuid;
+  v_email text := 'YOUR-EMAIL@EXAMPLE.COM'; -- ⚠️ CHANGE THIS!
+BEGIN
+  SELECT user_id INTO v_user_id FROM users WHERE email = v_email;
+  
+  INSERT INTO user_roles (user_id, role_name, assigned_at)
+  VALUES (v_user_id, 'Admin', CURRENT_TIMESTAMP)
+  ON CONFLICT (user_id, role_name) DO NOTHING;
+  
+  RAISE NOTICE '✅ Admin role added!';
+END $$;
+            </div>
+            <p>Remember to replace <code>YOUR-EMAIL@EXAMPLE.COM</code> with your actual email!</p>
+        </div>
+
+        <div class="step">
+            <h3>Step 4: Verify It Worked</h3>
+            <p>Run this query (replace the email):</p>
+            <div class="code-block">
+SELECT 
+  email,
+  array_agg(ur.role_name) as roles
+FROM users u
+LEFT JOIN user_roles ur ON u.user_id = ur.user_id
+WHERE u.email = 'YOUR-EMAIL@EXAMPLE.COM'
+GROUP BY email;
+            </div>
+            <p>You should see <code>{Admin}</code> in the roles column.</p>
+        </div>
+
+        <div class="warning">
+            <h3>⚠️ CRITICAL STEP - Don't Skip!</h3>
+            <p><strong>You MUST log out and log back in for this to take effect!</strong></p>
+            <p>Your current login session has a JWT token that was created BEFORE you had the Admin role. The token only updates when you log in.</p>
+        </div>
+
+        <div class="step">
+            <h3>Step 5: Log Out and Back In</h3>
+            <ul class="checklist">
+                <li>Go to <a href="http://localhost:8000" target="_blank">http://localhost:8000</a></li>
+                <li>Click <strong>"Log Out"</strong></li>
+                <li><strong>Log back in</strong> with your email and password</li>
+                <li>The system will create a new JWT token with your Admin role</li>
+            </ul>
+        </div>
+
+        <div class="success">
+            <h3>✅ Test Your Admin Access</h3>
+            <p>After logging back in, visit:</p>
+            <a href="http://localhost:8000/admin/users" target="_blank" class="button success">
+                Open Admin Users Page
+            </a>
+            <p>You should see the admin panel with no 403 error!</p>
+        </div>
+
+        <h2>Quick Links</h2>
+        <a href="http://localhost:8000" target="_blank" class="button">Open Voting App</a>
+        <a href="https://supabase.com/dashboard" target="_blank" class="button">Supabase Dashboard</a>
+        <a href="http://localhost:8000/admin" target="_blank" class="button success">Admin Panel</a>
+
+        <h2>Still Having Issues?</h2>
+        <p>Check these files in your project:</p>
+        <ul>
+            <li><code>QUICKFIX-ADMIN-ACCESS.md</code> - Detailed steps</li>
+            <li><code>database/URGENT-FIX-ADMIN-NOW.sql</code> - SQL script with comments</li>
+            <li><code>ADMIN-ACCESS-TROUBLESHOOTING.md</code> - Full troubleshooting guide</li>
+        </ul>
+
+        <div class="warning">
+            <h3>Common Mistakes</h3>
+            <ul>
+                <li><strong>Didn't log out and back in</strong> - This is the #1 reason people think it didn't work</li>
+                <li><strong>Typo in email address</strong> - Check your email is correct in the SQL</li>
+                <li><strong>Forgot to replace the placeholder email</strong> - Make sure you changed 'YOUR-EMAIL@EXAMPLE.COM'</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>

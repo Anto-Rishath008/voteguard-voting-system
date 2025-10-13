@@ -162,8 +162,10 @@ export async function POST(request: NextRequest) {
 
     // Set HTTP-only cookie
     const response = NextResponse.json({
+      success: true,
       message: "Login successful",
       user: {
+        userId: user.user_id,
         id: user.user_id,
         email: user.email,
         firstName: user.first_name,
@@ -171,16 +173,19 @@ export async function POST(request: NextRequest) {
         status: user.status,
         roles: user.roles,
         emailVerified: user.email_verified
-      }
+      },
+      token: token // Include token in response for client-side storage if needed
     });
 
     response.cookies.set('auth-token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 86400 // 24 hours
+      sameSite: process.env.NODE_ENV === 'production' ? 'lax' : 'strict',
+      maxAge: 86400, // 24 hours
+      path: '/'
     });
 
+    console.log('✅ LOGIN SUCCESSFUL - User:', user.email, 'Roles:', user.roles);
     return response;
 
   } catch (error) {

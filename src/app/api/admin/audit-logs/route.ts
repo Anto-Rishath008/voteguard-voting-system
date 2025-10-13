@@ -49,21 +49,18 @@ export async function GET(request: NextRequest) {
     try {
       // Build Supabase query with filters
       let query = supabaseAuth.supabaseAdmin
-        .from('audit_logs')
+        .from('audit_log')
         .select(`
-          log_id,
+          audit_id,
           user_id,
-          action,
+          operation_type,
           table_name,
           record_id,
           old_values,
           new_values,
-          created_at,
+          timestamp,
           ip_address,
           user_agent,
-          details,
-          resource_type,
-          resource_id,
           users:user_id (
             first_name,
             last_name,
@@ -76,18 +73,18 @@ export async function GET(request: NextRequest) {
         query = query.eq('user_id', userId);
       }
       if (operation) {
-        query = query.eq('action', operation);
+        query = query.eq('operation_type', operation);
       }
       if (startDate) {
-        query = query.gte('created_at', startDate);
+        query = query.gte('timestamp', startDate);
       }
       if (endDate) {
-        query = query.lte('created_at', endDate);
+        query = query.lte('timestamp', endDate);
       }
 
       // Apply pagination and ordering
       const { data: auditLogs, error: auditError, count } = await query
-        .order('created_at', { ascending: false })
+        .order('timestamp', { ascending: false })
         .range(offset, offset + limit - 1);
 
       if (auditError) {
@@ -97,19 +94,16 @@ export async function GET(request: NextRequest) {
 
       // Transform the data to match expected format
       const transformedLogs = (auditLogs || []).map((log: any) => ({
-        audit_log_id: log.log_id,
+        audit_log_id: log.audit_id,
         user_id: log.user_id,
-        operation_type: log.action,
+        operation_type: log.operation_type,
         table_name: log.table_name,
         record_id: log.record_id,
         old_values: log.old_values,
         new_values: log.new_values,
-        timestamp: log.created_at,
+        timestamp: log.timestamp,
         ip_address: log.ip_address,
         user_agent: log.user_agent,
-        details: log.details,
-        resource_type: log.resource_type,
-        resource_id: log.resource_id,
         users: log.users ? {
           first_name: log.users.first_name,
           last_name: log.users.last_name,
@@ -160,17 +154,17 @@ export async function POST(request: NextRequest) {
     try {
       // Create audit log entry using Supabase
       const { error: insertError } = await supabaseAuth.supabaseAdmin
-        .from('audit_logs')
+        .from('audit_log')
         .insert([{
           user_id: userId,
-          action: operationType,
+          operation_type: operationType,
           table_name: tableName,
           record_id: recordId,
           old_values: oldValues || null,
           new_values: newValues || null,
           ip_address: ipAddress,
           user_agent: userAgent,
-          created_at: new Date().toISOString()
+          timestamp: new Date().toISOString()
         }]);
 
       if (insertError) {

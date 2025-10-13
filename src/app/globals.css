@@ -24,3 +24,45 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Ensure all input and select elements have dark, visible text */
+input,
+select,
+textarea {
+  color: #111827;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #6b7280;
+}
+
+/* Keep disabled inputs readable with dark text */
+input:disabled,
+select:disabled,
+textarea:disabled {
+  color: #1f2937 !important;
+  opacity: 1;
+  -webkit-text-fill-color: #1f2937;
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+  input,
+  select,
+  textarea {
+    color: #f9fafb;
+  }
+  
+  input::placeholder,
+  textarea::placeholder {
+    color: #9ca3af;
+  }
+
+  input:disabled,
+  select:disabled,
+  textarea:disabled {
+    color: #e5e7eb !important;
+    -webkit-text-fill-color: #e5e7eb;
+  }
+}

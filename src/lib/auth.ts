@@ -20,13 +20,13 @@ export interface JWTPayload {
 }
 
 export class AuthService {
-  // Azure Database Authentication Methods
-  static async loginWithAzureDB(
+  // Supabase Database Authentication Methods
+  static async login(
     email: string,
     password: string
   ): Promise<{ user: AuthUser | null; error: string | null }> {
     try {
-      // Use our Azure Database login API
+      // Use our Supabase login API
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: {
@@ -62,7 +62,7 @@ export class AuthService {
 
       return { user: null, error: "Authentication failed" };
     } catch (error) {
-      console.error("Azure DB login error:", error);
+      console.error("Supabase login error:", error);
       return { user: null, error: "Network error occurred" };
     }
   }

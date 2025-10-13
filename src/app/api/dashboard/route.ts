@@ -152,10 +152,10 @@ export async function GET(request: NextRequest) {
     if (userProfile.role === 'admin' || userProfile.role === 'super_admin') {
       // Get recent audit logs
       const { data: auditLogs } = await supabaseAdmin
-        .from('audit_logs')
+        .from('audit_log')
         .select('*')
-        .or('action.like.%SECURITY%,action.like.%LOGIN%')
-        .order('created_at', { ascending: false })
+        .or('operation_type.like.%SECURITY%,operation_type.like.%LOGIN%')
+        .order('timestamp', { ascending: false })
         .limit(10);
 
       dashboardData.adminData = {

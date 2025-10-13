@@ -1,6 +1,7 @@
 # VoteGuard - Enterprise Voting System
 
-A comprehensive, enterprise-grade voting system built with Next.js, TypeScript, and Azure Database for PostgreSQL. This system demonstrates advanced Database Management System concepts with role-based access control, real-time election management, comprehensive audit capabilities, and enterprise-level security features.
+A comprehensive, enterprise-grade voting system built with ### 5. Run Database Migrations
+The schema is already executed in step 3. Verify tables are created in Supabase dashboard.s, TypeScript, and Supabase (PostgreSQL). This system demonstrates advanced Database Management System concepts with role-based access control, real-time election management, comprehensive audit capabilities, and enterprise-level security features.
 
 ## 🎓 Database Management System Project
 
@@ -9,7 +10,7 @@ This project showcases advanced database concepts for academic excellence:
 - **ACID Compliance**: Full transaction management with consistency guarantees
 - **Enterprise Security**: Multi-layered security with RBAC, audit trails, encryption
 - **Performance Optimization**: Strategic indexing, connection pooling, query monitoring
-- **Cloud Architecture**: Azure Database for PostgreSQL with scalable design
+- **Cloud Architecture**: Supabase with Vercel deployment and scalable design
 - **Professional Documentation**: Complete technical documentation and deployment guides
 
 ## 🚀 Enhanced Features
@@ -33,19 +34,19 @@ This project showcases advanced database concepts for academic excellence:
 
 - **Frontend**: Next.js 15, React 19, TypeScript
 - **Styling**: Tailwind CSS with responsive design
-- **Database**: Azure Database for PostgreSQL Flexible Server
-- **Authentication**: JWT with bcrypt, multi-layered security
-- **Database Library**: Custom enhanced PostgreSQL library with pooling
+- **Database**: Supabase (PostgreSQL) with real-time capabilities
+- **Authentication**: Supabase Auth with JWT, bcrypt, multi-layered security
+- **Database Library**: Supabase client with connection pooling
 - **Icons**: Lucide React
-- **Deployment**: Azure App Service with CI/CD pipeline
+- **Deployment**: Vercel with automatic CI/CD pipeline
 - **Monitoring**: Built-in performance and security monitoring
 
 ## 📋 Prerequisites
 
 - Node.js 18+ and npm
-- Azure subscription (for Azure Database for PostgreSQL)
+- Supabase account (free tier available)
+- Vercel account (free tier available)
 - Git
-- Azure CLI (for database setup)
 
 ## 🗄️ Enhanced Database Architecture
 
@@ -69,7 +70,7 @@ This project showcases advanced database concepts for academic excellence:
 - **Connection Pooling**: Efficient resource management
 - **Transaction Management**: ACID compliance with rollback support
 
-## 🚀 Quick Start (Azure Database)
+## 🚀 Quick Start (Supabase + Vercel)
 
 ### 1. Clone the repository
 ```bash
@@ -82,30 +83,19 @@ cd voting-system
 npm install
 ```
 
-### 3. Azure Database Setup
-Follow the comprehensive setup guide:
-```bash
-# See docs/AZURE_MIGRATION_GUIDE.md for detailed instructions
-```
+### 3. Supabase Setup
+1. Create a new project on [Supabase](https://supabase.com)
+2. Run the database schema from `database/enhanced_schema.sql` in Supabase SQL Editor
+3. Get your project credentials from Project Settings → API
 
 ### 4. Environment Configuration
-Copy the Azure environment template:
-```bash
-cp .env.azure .env.local
-```
-
-Update with your Azure Database credentials:
+Create a `.env.local` file with your Supabase credentials:
 ```env
-AZURE_DATABASE_URL=postgresql://username:password@server.postgres.database.azure.com:5432/database?sslmode=require
-DB_MAX_CONNECTIONS=20
+NEXT_PUBLIC_SUPABASE_URL=your-project-url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ENABLE_AUDIT_LOGGING=true
 ENABLE_SECURITY_MONITORING=true
-```
-
-### 5. Database Migration
-Run the enhanced migration script:
-```bash
-node azure-migration.js
 ```
 
 ### 5. Run the development server
@@ -113,7 +103,7 @@ node azure-migration.js
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) to view the application.
+Open [http://localhost:8000](http://localhost:8000) to view the application.
 
 ## 📁 Project Structure
 
@@ -140,12 +130,12 @@ src/
 
 ## 🚀 Deployment
 
-### Azure Deployment
-This application is configured for deployment on Azure App Service with Azure PostgreSQL.
+### Vercel Deployment
+This application is configured for deployment on Vercel with Supabase.
 
-1. **Database**: Azure Database for PostgreSQL
-2. **App Service**: Node.js runtime with continuous deployment
-3. **Environment**: Configure app settings in Azure portal
+1. **Database**: Supabase (PostgreSQL)
+2. **Hosting**: Vercel with automatic deployments
+3. **Environment**: Configure environment variables in Vercel dashboard
 
 ## 📝 API Endpoints
 
