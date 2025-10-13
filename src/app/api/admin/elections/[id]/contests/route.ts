@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyJWT } from "@/lib/auth";
-import { getDatabase } from "@/lib/enhanced-database";
+import { supabaseAuth } from "@/lib/supabase-auth";
 
 // GET contests for an election
 export async function GET(
@@ -17,47 +17,40 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const db = getDatabase();
+    // Check if user has admin permissions from JWT
+    const hasAdminPermission = authUser.roles?.includes("Admin") || false;
+    const hasSuperAdminPermission = authUser.roles?.includes("SuperAdmin") || false;
     
-    // Check if user has admin permissions
-    const roleResult = await db.query(
-      "SELECT role_name FROM user_roles WHERE user_id = $1 AND role_name IN ('Admin', 'SuperAdmin')",
-      [authUser.userId]
-    );
-    
-    if (roleResult.rows.length === 0) {
+    if (!hasAdminPermission && !hasSuperAdminPermission) {
       return NextResponse.json(
         { error: "Admin access required" },
         { status: 403 }
       );
     }
 
-    // Get contests with candidates using direct SQL
-    const contestsResult = await db.query(`
-      SELECT 
-        c.contest_id,
-        c.contest_title,
-        c.contest_type,
-        COALESCE(
-          json_agg(
-            json_build_object(
-              'candidate_id', cand.candidate_id,
-              'candidate_name', cand.candidate_name,
-              'party', cand.party
-            )
-            ORDER BY cand.candidate_name
-          ) FILTER (WHERE cand.candidate_id IS NOT NULL),
-          '[]'
-        ) as candidates
-      FROM contests c
-      LEFT JOIN candidates cand ON c.contest_id = cand.contest_id AND c.election_id = cand.election_id
-      WHERE c.election_id = $1
-      GROUP BY c.contest_id, c.contest_title, c.contest_type
-      ORDER BY c.contest_id
-    `, [electionId]);
+    // Get contests with candidates using Supabase
+    const { data: contests, error: contestsError } = await supabaseAuth.supabaseAdmin
+      .from('contests')
+      .select(`
+        contest_id,
+        contest_title,
+        contest_type,
+        candidates (
+          candidate_id,
+          candidate_name,
+          party
+        )
+      `)
+      .eq('election_id', electionId)
+      .order('contest_id');
+
+    if (contestsError) {
+      console.error("Error fetching contests:", contestsError);
+      throw contestsError;
+    }
 
     // Format the response
-    const formattedContests = contestsResult.rows.map((contest) => ({
+    const formattedContests = (contests || []).map((contest: any) => ({
       id: contest.contest_id,
       title: contest.contest_title,
       contestType: contest.contest_type,
@@ -93,15 +86,11 @@ export async function POST(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const db = getDatabase();
+    // Check if user has admin permissions from JWT
+    const hasAdminPermission = authUser.roles?.includes("Admin") || false;
+    const hasSuperAdminPermission = authUser.roles?.includes("SuperAdmin") || false;
     
-    // Check if user has admin permissions
-    const roleResult = await db.query(
-      "SELECT role_name FROM user_roles WHERE user_id = $1 AND role_name IN ('Admin', 'SuperAdmin')",
-      [authUser.userId]
-    );
-    
-    if (roleResult.rows.length === 0) {
+    if (!hasAdminPermission && !hasSuperAdminPermission) {
       return NextResponse.json(
         { error: "Admin access required" },
         { status: 403 }
@@ -125,15 +114,21 @@ export async function POST(
       );
     }
 
-    // Create contest using direct SQL
-    const contestResult = await db.query(
-      `INSERT INTO contests (election_id, contest_title, contest_type)
-       VALUES ($1, $2, $3)
-       RETURNING contest_id, contest_title, contest_type`,
-      [electionId, title, contestType]
-    );
+    // Create contest using Supabase
+    const { data: contest, error: contestError } = await supabaseAuth.supabaseAdmin
+      .from('contests')
+      .insert({
+        election_id: electionId,
+        contest_title: title,
+        contest_type: contestType
+      })
+      .select('contest_id, contest_title, contest_type')
+      .single();
 
-    const contest = contestResult.rows[0];
+    if (contestError) {
+      console.error("Error creating contest:", contestError);
+      throw contestError;
+    }
 
     return NextResponse.json({
       message: "Contest created successfully",
