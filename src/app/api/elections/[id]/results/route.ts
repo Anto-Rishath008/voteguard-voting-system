@@ -131,73 +131,111 @@ export async function GET(
     console.log("📊 [Results API] Processing contest results...");
     const contests = await Promise.all(
       (contestsData || []).map(async (contest: any) => {
-        console.log(`📊 [Results API] Processing contest: ${contest.contest_title}`);
-        
-        // Get candidates for this contest
-        const { data: candidatesData } = await supabaseAuth.supabaseAdmin
-          .from('candidates')
-          .select('candidate_id, candidate_name, party')
-          .eq('contest_id', contest.contest_id)
-          .order('candidate_id');
+        try {
+          console.log(`📊 [Results API] Processing contest: ${contest.contest_title}`);
+          
+          // Get candidates for this contest
+          const { data: candidatesData, error: candidatesError } = await supabaseAuth.supabaseAdmin
+            .from('candidates')
+            .select('candidate_id, candidate_name, party')
+            .eq('contest_id', contest.contest_id)
+            .order('candidate_id');
 
-        // Get vote counts for each candidate
-        const candidateResults = await Promise.all(
-          (candidatesData || []).map(async (candidate: any) => {
-            const { count } = await supabaseAuth.supabaseAdmin
-              .from('votes')
-              .select('*', { count: 'exact', head: true })
-              .eq('candidate_id', candidate.candidate_id)
-              .eq('election_id', electionId);
-
+          if (candidatesError) {
+            console.error(`📊 [Results API] Error fetching candidates for contest ${contest.contest_id}:`, candidatesError);
             return {
-              id: candidate.candidate_id,
-              name: candidate.candidate_name,
-              party: candidate.party,
-              votes: count || 0,
+              id: contest.contest_id,
+              title: contest.contest_title,
+              description: '',
+              contestType: contest.contest_type,
+              totalVotes: 0,
+              candidates: [],
             };
-          })
-        );
+          }
 
-        // Calculate total votes for this contest
-        const totalContestVotes = candidateResults.reduce(
-          (sum: number, candidate: any) => sum + candidate.votes,
-          0
-        );
+          // Get vote counts for each candidate
+          const candidateResults = await Promise.all(
+            (candidatesData || []).map(async (candidate: any) => {
+              try {
+                const { count, error: countError } = await supabaseAuth.supabaseAdmin
+                  .from('votes')
+                  .select('*', { count: 'exact', head: true })
+                  .eq('candidate_id', candidate.candidate_id)
+                  .eq('election_id', electionId);
 
-        // Calculate percentages and determine winner(s)
-        const candidatesWithPercentages = candidateResults.map((candidate: any) => ({
-          ...candidate,
-          percentage:
-            totalContestVotes > 0
-              ? (candidate.votes / totalContestVotes) * 100
-              : 0,
-        }));
+                if (countError) {
+                  console.error(`📊 [Results API] Error counting votes for candidate ${candidate.candidate_id}:`, countError);
+                }
 
-        // Sort by votes (descending)
-        candidatesWithPercentages.sort((a: any, b: any) => b.votes - a.votes);
+                return {
+                  id: candidate.candidate_id,
+                  name: candidate.candidate_name,
+                  party: candidate.party,
+                  votes: count || 0,
+                };
+              } catch (error) {
+                console.error(`📊 [Results API] Exception counting votes for candidate:`, error);
+                return {
+                  id: candidate.candidate_id,
+                  name: candidate.candidate_name,
+                  party: candidate.party,
+                  votes: 0,
+                };
+              }
+            })
+          );
 
-        // Mark winners (for single-winner contests, just the first; for multi-winner, top N)
-        // Default to single winner for all contest types (max_selections = 1)
-        const maxVotes = candidatesWithPercentages[0]?.votes || 0;
-        const candidatesWithWinners = candidatesWithPercentages.map(
-          (candidate: any, index: number) => ({
-            id: candidate.id,
-            name: candidate.name,
-            party: candidate.party,
-            votes: candidate.votes, // Keep as 'votes' to match frontend expectation
-            percentage: candidate.percentage,
-            isWinner: index === 0 && candidate.votes > 0, // Only first candidate wins if they have votes
-          })
-        );
+          // Calculate total votes for this contest
+          const totalContestVotes = candidateResults.reduce(
+            (sum: number, candidate: any) => sum + candidate.votes,
+            0
+          );
 
-        return {
-          id: contest.contest_id,
-          title: contest.contest_title,
-          description: '', // Not available in schema
-          contestType: contest.contest_type, // Add contestType for frontend
-          totalVotes: totalContestVotes,
-          candidates: candidatesWithWinners,
-        };
+          // Calculate percentages and determine winner(s)
+          const candidatesWithPercentages = candidateResults.map((candidate: any) => ({
+            ...candidate,
+            percentage:
+              totalContestVotes > 0
+                ? (candidate.votes / totalContestVotes) * 100
+                : 0,
+          }));
+
+          // Sort by votes (descending)
+          candidatesWithPercentages.sort((a: any, b: any) => b.votes - a.votes);
+
+          // Mark winners (for single-winner contests, just the first; for multi-winner, top N)
+          // Default to single winner for all contest types (max_selections = 1)
+          const maxVotes = candidatesWithPercentages[0]?.votes || 0;
+          const candidatesWithWinners = candidatesWithPercentages.map(
+            (candidate: any, index: number) => ({
+              id: candidate.id,
+              name: candidate.name,
+              party: candidate.party,
+              votes: candidate.votes, // Keep as 'votes' to match frontend expectation
+              percentage: candidate.percentage,
+              isWinner: index === 0 && candidate.votes > 0, // Only first candidate wins if they have votes
+            })
+          );
+
+          return {
+            id: contest.contest_id,
+            title: contest.contest_title,
+            description: '', // Not available in schema
+            contestType: contest.contest_type, // Add contestType for frontend
+            totalVotes: totalContestVotes,
+            candidates: candidatesWithWinners,
+          };
+        } catch (error) {
+          console.error(`📊 [Results API] Exception processing contest ${contest.contest_id}:`, error);
+          return {
+            id: contest.contest_id,
+            title: contest.contest_title,
+            description: '',
+            contestType: contest.contest_type,
+            totalVotes: 0,
+            candidates: [],
+          };
+        }
       })
     );
 
