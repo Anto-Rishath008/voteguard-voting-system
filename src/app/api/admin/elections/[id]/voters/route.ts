@@ -50,7 +50,8 @@ export async function GET(
         user_id,
         status,
         added_at,
-        users (
+        users:user_id (
+          user_id,
           first_name,
           last_name,
           email
@@ -60,7 +61,13 @@ export async function GET(
 
     if (eligibleError) {
       console.error("Error fetching eligible voters:", eligibleError);
-      throw eligibleError;
+      return NextResponse.json(
+        { 
+          error: "Failed to fetch eligible voters",
+          details: process.env.NODE_ENV === 'development' ? eligibleError.message : undefined
+        },
+        { status: 500 }
+      );
     }
 
     // Check who has voted
@@ -84,11 +91,11 @@ export async function GET(
     }));
 
     // Get all voters (users with Voter role) for adding new eligible voters
-    const { data: allVoterRoles } = await supabaseAuth.supabaseAdmin
+    const { data: allVoterRoles, error: votersError } = await supabaseAuth.supabaseAdmin
       .from('user_roles')
       .select(`
         user_id,
-        users (
+        users:user_id (
           user_id,
           first_name,
           last_name,
@@ -97,15 +104,22 @@ export async function GET(
       `)
       .eq('role_name', 'Voter');
 
+    if (votersError) {
+      console.error("Error fetching all voters:", votersError);
+      // Don't fail the request, just return empty voters list
+    }
+
     const eligibleUserIds = new Set(eligibleVoters?.map((ev: any) => ev.user_id) || []);
 
-    const allVoters = (allVoterRoles || []).map((role: any) => ({
-      user_id: role.users?.user_id,
-      first_name: role.users?.first_name,
-      last_name: role.users?.last_name,
-      email: role.users?.email,
-      is_eligible: eligibleUserIds.has(role.users?.user_id)
-    }));
+    const allVoters = (allVoterRoles || [])
+      .filter((role: any) => role.users) // Filter out any null users
+      .map((role: any) => ({
+        user_id: role.users.user_id,
+        first_name: role.users.first_name,
+        last_name: role.users.last_name,
+        email: role.users.email,
+        is_eligible: eligibleUserIds.has(role.users.user_id)
+      }));
 
     return NextResponse.json({
       election,
